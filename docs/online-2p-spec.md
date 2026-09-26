@@ -1,6 +1,7 @@
 # Spec: online 2-player versus with a join code
 
-Status: draft, decisions from two reviews added (section 10)
+Status: implemented (all six milestones); decisions from two reviews and
+what changed while building are in section 10
 Scope: play the existing versus rules on two different devices (phone, tablet
 or desktop, in any mix). One player creates a room and gets a short join code;
 the other enters the code, opens a share link or scans a QR code.
@@ -492,6 +493,7 @@ ordered data channel.
 | `pause` / `resume` | both | `reason?` | Pause both / resume both. `pause` has `reason: 'hidden'` when the sender went to the background (2.6). |
 | `ping` / `pong` | both | `ts` | Every 1 s from a timer; the only liveness signal ("lost" after 5 s) and a latency readout. |
 | `bye` | both | | Player left the room. |
+| `sync` | host to guest | `round`, `seed`, `winner`, `ready`, `wins` | Sent right after the host's `hello` on a reconnect: where the room is (added while building, see 10). |
 
 The build ID is the deployed commit, injected at build time with Vite's
 `define` (e.g. `__BUILD_ID__` from `GITHUB_SHA` in the deploy workflow, `dev`
@@ -621,4 +623,19 @@ lobby (2.1), the share link URL (4.3), `GameScreen` deciding results itself
 (5.1), `drawPlayer()` needing ghost / hold / next (3), the snapshot sequence
 number (5.3).
 
-No open questions left. New ones found while building go here.
+Found while building:
+
+| Topic | What changed | Where |
+| --- | --- | --- |
+| A result or `start` lost in an outage | New `sync` message: after a reconnect the host sends round, seed, result, its ready flag and the win counter, and the guest lines up with it. Without it, a `result` sent just before the connection dropped would leave the guest playing a round the host had ended. | 4.5, 6 |
+| Who says "Room is full" | The session, not the transport: only the session knows the resume token. The host's transport delivers messages from new connections as candidates and the session calls `accept(conn)` or `reject(conn, message)`. `join()` rejects with `not-found` or `failed` only. | 4.2, 4.6 |
+| QR library | `lean-qr`: 3.7 KB gzipped, against 3.9 KB for `uqr`, 7.6 KB for `qrcode-generator` and 9.6 KB for `qrcode` (esbuild, minified). | 4.3 |
+| Guest reconnect timing | A new attempt starts 2 s after the previous one failed (each attempt gives up after 8 s), not every 2 s, so attempts can't pile up on a slow network. | 4.5 |
+| What `sessionStorage` keeps | Also the round's seed and result, so a reload after a finished round goes straight back to the result screen. Still nothing about the board. | 4.5 |
+| Grace period start | Counted from the last message heard (plus the 5 s), so a page back from a long suspension sees at once that the grace period is over. | 2.6 |
+| Own broker | `VITE_PEER_SERVER` at build time points PeerJS at our own peerjs-server. Also used to test `PeerTransport` against a local broker. | 4.1 |
+| Outgoing Drop | Plays `boom` but doesn't shake the sender's camera; the shake is for the player who is hit. | 5.2 |
+| "Joined" message | The host sees "SAM JOINED", the guest "JOINED ALEX". | 2.2 |
+| Portrait HUD with the mini board | Stats, hold, next and powers move into the left 7 units of the HUD; the mini board takes the top right at 30%. Still needs a check on a real small phone. | 3 |
+
+No open questions left.

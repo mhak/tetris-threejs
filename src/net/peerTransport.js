@@ -7,6 +7,17 @@ import { Peer } from 'peerjs';
 import { Transport } from './transport.js';
 import { peerIdFor } from './joinCode.js';
 
+/**
+ * Our own broker instead of the public one, when the build sets e.g.
+ * VITE_PEER_SERVER=https://peer.example.com/tetris (a peerjs-server).
+ */
+export function brokerOptions(url = import.meta.env?.VITE_PEER_SERVER) {
+  if (!url) return {};
+  const u = new URL(url);
+  const secure = u.protocol === 'https:';
+  return { host: u.hostname, port: Number(u.port) || (secure ? 443 : 80), path: u.pathname, secure };
+}
+
 const BROKER_RETRY_MS = 2000;
 const CLOSE_DELAY_MS = 1000; // lets a last message (bye) leave before the peer is destroyed
 const CONNECT_OPTIONS = { reliable: true, serialization: 'json' };
@@ -14,7 +25,7 @@ const CONNECT_OPTIONS = { reliable: true, serialization: 'json' };
 export class PeerTransport extends Transport {
   constructor(peerOptions = {}) {
     super();
-    this.peerOptions = { debug: 1, ...peerOptions };
+    this.peerOptions = { debug: 1, ...brokerOptions(), ...peerOptions };
     this.peer = null;
     this.conn = null;
     this.candidates = new Set();

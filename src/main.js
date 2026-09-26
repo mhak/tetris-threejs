@@ -41,10 +41,7 @@ const lobby = new Lobby();
 const hud = new MatchHud();
 const storage = roomStorage();
 
-// Online play stays behind ?online=1 until it is finished; a ?join= link always works.
 const joinParam = normalizeCode(params.get('join'));
-const ONLINE = params.get('online') === '1' || isValidCode(joinParam);
-document.getElementById('online-buttons').hidden = !ONLINE;
 
 let game = null; // solo game
 let session = null; // online room
