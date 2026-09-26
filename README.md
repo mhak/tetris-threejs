@@ -25,6 +25,13 @@ One-time setup: in the repository's **Settings > Pages**, set **Source** to
 **GitHub Actions**. The site is then served at
 `https://<owner>.github.io/tetris-threejs/`.
 
+The site asks search engines not to index it: `index.html` has a
+`noindex, nofollow` robots meta tag, and `public/robots.txt` disallows all
+crawlers. Crawlers only read `robots.txt` at a domain root, so on a project
+page like this one the meta tag is what takes effect; `robots.txt` applies if
+the site is ever served from its own domain. Neither one hides the site from
+people who have the link.
+
 ## What was ported
 
 | Original (C#) | Port |
