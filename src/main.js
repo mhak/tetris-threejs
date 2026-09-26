@@ -6,10 +6,11 @@ import { Renderer } from './render/renderer.js';
 import { FONT } from './render/textPlane.js';
 import { TouchControls } from './touch.js';
 import { Lobby } from './ui/lobby.js';
-import { Session } from './net/session.js';
+import { MatchHud } from './ui/matchHud.js';
+import { Session, roomStorage } from './net/session.js';
 import { isValidCode, normalizeCode } from './net/joinCode.js';
 
-// 2-player versus is disabled for now; it will be added back later.
+// 2-player versus on one device is disabled for now; it will be added back later.
 // To re-enable it, switch these lines (and uncomment the P2 controls in index.html).
 const PLAYER_COUNT = 1;
 // const PLAYER_COUNT = 2;
@@ -35,7 +36,10 @@ const renderer = new Renderer(view, PLAYER_COUNT);
 const touch = new TouchControls(app, document.getElementById('touch-bar'), () => renderer.pxPerUnit);
 const overlay = document.getElementById('start');
 const menu = document.getElementById('menu');
+const rejoinPanel = document.getElementById('rejoin');
 const lobby = new Lobby();
+const hud = new MatchHud();
+const storage = roomStorage();
 
 // Online play stays behind ?online=1 until it is finished; a ?join= link always works.
 const joinParam = normalizeCode(params.get('join'));
@@ -43,7 +47,8 @@ const ONLINE = params.get('online') === '1' || isValidCode(joinParam);
 document.getElementById('online-buttons').hidden = !ONLINE;
 
 let game = null; // solo game
-let session = null; // online room; its game is shown once a round starts
+let session = null; // online room
+let inRoom = false; // the online game is on screen (from the first countdown until Back to start)
 let debugGuest = null; // ?debug=loopback: { session, renderer } for the right half
 let last = performance.now();
 
@@ -63,7 +68,7 @@ function splitView() {
 
 /** The game on screen: the online one while in a room, else solo. */
 function activeGame() {
-  return session?.inRoom ? session.game : game;
+  return inRoom ? session.game : game;
 }
 
 function getState(i) {
@@ -71,7 +76,8 @@ function getState(i) {
   if (i !== 0) return state;
   const t = touch.getState();
   for (const [button, down] of Object.entries(t)) if (down) state[button] = true;
-  // After game over (or a win), a tap on the board starts the next round.
+  // After game over (or a win), a tap on the board starts the next round
+  // (online: says we're ready for a rematch).
   if (activeGame()?.isFinished && t.a) state.start = true;
   return state;
 }
@@ -83,8 +89,13 @@ function addEffects(g, r = renderer) {
   g.onHit = () => r.flash(0, 'hit');
 }
 
+/** The start screen is busy with something other than "press any key". */
+function menuBusy() {
+  return lobby.isOpen || !rejoinPanel.hidden || !!session;
+}
+
 function start() {
-  if (game || session || lobby.isOpen) return;
+  if (game || menuBusy()) return;
   if (DEBUG_LOOPBACK) return startLoopback();
   overlay.classList.add('hidden');
   audio.unlock();
@@ -103,6 +114,7 @@ overlay.addEventListener('click', start);
 
 function showMenu() {
   lobby.close();
+  rejoinPanel.hidden = true;
   menu.hidden = false;
 }
 
@@ -131,12 +143,17 @@ lobby.onCancel = () => {
   showMenu();
 };
 
+async function newTransport() {
+  const { PeerTransport } = await import('./net/peerTransport.js');
+  return new PeerTransport();
+}
+
 async function startSession(role, { name = lobby.name, code = null } = {}) {
   endSession();
   audio.unlock();
-  const { PeerTransport } = await import('./net/peerTransport.js');
+  const transport = await newTransport();
   if (!lobby.isOpen) return; // cancelled while loading
-  openSession(new Session({ role, name, code, sounds: audio, transport: new PeerTransport() }));
+  openSession(new Session({ role, name, code, sounds: audio, storage, transport }));
 }
 
 function openSession(s) {
@@ -148,8 +165,10 @@ function openSession(s) {
 }
 
 function endSession() {
-  session?.leave();
+  // Forget it first: leaving fires one last onChange.
+  const s = session;
   session = null;
+  s?.leave();
 }
 
 async function startLoopback() {
@@ -164,39 +183,48 @@ async function startLoopback() {
   debugGuest = { session: guest, renderer: new Renderer(document.getElementById('debug-right'), ONLINE_BOARDS) };
   addEffects(guest.game, debugGuest.renderer);
   guest.onAttackSent = () => debugGuest.renderer.flash(1, 'attack');
-  window.debugSessions = { host, guest }; // for poking at from the console
+  window.debugSessions = { host, guest, network }; // for poking at from the console
   guest.open();
 }
 
 /** Switches between the lobby and the match as the room changes state. */
 function updateSession() {
   const s = session;
-  if (s.inRoom) {
-    if (!overlay.classList.contains('hidden') || renderer.boards.length !== 2) enterRoom(s);
-    return;
-  }
-  if (s.state === 'closed' && overlay.classList.contains('hidden')) {
-    leaveRoom();
+  if (s.inRoom && !inRoom) enterRoom(s);
+  if (inRoom) {
+    // Leaving on purpose goes straight back; anything else shows why the room ended.
+    if (s.state === 'closed' && s.closeReason === 'left') leaveRoom();
+    else hud.render(s);
     return;
   }
   updateLobby(s);
 }
 
 function enterRoom(s) {
+  inRoom = true;
   lobby.close();
+  rejoinPanel.hidden = true;
   overlay.classList.add('hidden');
   renderer.setBoards(ONLINE_BOARDS);
   if (s.role === 'guest') dropJoinParam();
+  if (!s.restored) hud.toast(s.isHost ? `${s.names[1]} JOINED` : `JOINED ${s.names[1]}`);
   // Don't let the tap or key that joined count as a fresh press.
   s.game.oldStates[0] = getState(0);
 }
 
 function leaveRoom() {
-  session = null;
+  inRoom = false;
+  endSession();
+  hud.hide();
   renderer.setBoards(PLAYER_COUNT);
   overlay.classList.remove('hidden');
   showMenu();
 }
+
+hud.onRematch = () => session?.sendReady();
+hud.onResume = () => session?.resume();
+hud.onLeave = () => leaveRoom();
+hud.onBack = () => leaveRoom();
 
 function updateLobby(s) {
   lobby.setBusy(s.state === 'joining');
@@ -205,7 +233,7 @@ function updateLobby(s) {
       lobby.setStatus('CREATING ROOM...');
       break;
     case 'waiting':
-      lobby.showCode(s.code);
+      lobby.showCode(s.code, joinUrl(s.code));
       lobby.setStatus(
         s.notice === 'version' ? 'SOMEONE TRIED TO JOIN FROM A DIFFERENT VERSION.' : 'WAITING FOR OPPONENT...',
       );
@@ -215,8 +243,21 @@ function updateLobby(s) {
       break;
     case 'closed':
       if (s.closeReason !== 'left') lobby.showError(s.closeReason);
+      session = null;
       break;
   }
+}
+
+/**
+ * The link a guest opens to join. Built from the page's own address, not
+ * import.meta.env.BASE_URL, which is './' in the build and would lose the
+ * /tetris-threejs/ path.
+ */
+function joinUrl(code) {
+  const url = new URL(location.href);
+  url.search = '?join=' + code;
+  url.hash = '';
+  return url.href;
 }
 
 /** A reload after joining must not try to join a finished room again. */
@@ -227,10 +268,36 @@ function dropJoinParam() {
   history.replaceState(null, '', url);
 }
 
-if (isValidCode(joinParam)) openLobby('join', joinParam, true);
+// After a reload in the middle of a room: offer to rejoin it. The tap is
+// needed anyway, since audio only starts after a user gesture.
+function offerRejoin(saved) {
+  menu.hidden = true;
+  rejoinPanel.hidden = false;
+  document.getElementById('rejoin-text').textContent = `ROOM ${saved.code} WITH ${saved.names[1]}`;
+  document.getElementById('rejoin-go').onclick = async (e) => {
+    e.stopPropagation();
+    audio.unlock();
+    const s = Session.restore(saved, { sounds: audio, storage, transport: await newTransport() });
+    if (!s) return showMenu();
+    openSession(s);
+  };
+  document.getElementById('rejoin-leave').onclick = (e) => {
+    e.stopPropagation();
+    storage.clear();
+    showMenu();
+  };
+  rejoinPanel.addEventListener('click', (e) => e.stopPropagation());
+}
+
+const saved = storage.load();
+if (!DEBUG_LOOPBACK && Session.canRestore(saved)) offerRejoin(saved);
+else if (isValidCode(joinParam)) openLobby('join', joinParam, true);
 
 // Pause when the tab or app goes to the background (e.g. a phone call).
+// Online this pauses both players.
 document.addEventListener('visibilitychange', () => {
+  if (session) session.setHidden(document.hidden);
+  debugGuest?.session.setHidden(document.hidden);
   if (document.hidden && game && !game.isFinished) game.pause = true;
 });
 
@@ -238,10 +305,10 @@ function frame(now) {
   const dt = Math.min(now - last, MAX_FRAME_MS);
   last = now;
 
-  if (!game && !session && !lobby.isOpen && input.anyPadButtonPressed()) start();
+  if (!game && !menuBusy() && input.anyPadButtonPressed()) start();
 
   const shown = activeGame();
-  if (session?.inRoom) session.update(dt, getState);
+  if (inRoom) session.update(dt, getState);
   else if (game) game.update(dt, getState);
   if (shown) {
     audio.update({ paused: shown.pause, stopped: shown.isFinished });

@@ -15,8 +15,13 @@ export const MSG = Object.freeze({
   attack: 'attack', // { round, kind: 'line' | 'drop' }
   over: 'over', // { round } the sender topped out
   result: 'result', // host to guest { round, winner: 'host' | 'guest' | 'draw' }
-  pause: 'pause', // pause both
+  ready: 'ready', // { round } ready for a rematch
+  pause: 'pause', // { reason? } pause both; reason 'hidden' when the sender went to the background
   resume: 'resume', // resume both, after a countdown
+  ping: 'ping', // { ts } every second; the liveness signal
+  pong: 'pong', // { ts } answer to ping
+  bye: 'bye', // the player left the room
+  sync: 'sync', // host to guest after a reconnect { round, seed, winner, ready, wins }
 });
 
 /** True for something that looks like a protocol message. */

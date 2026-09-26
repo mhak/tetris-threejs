@@ -69,6 +69,15 @@ class LoopbackConnection {
     this.open = false;
     this.owner.connectionClosed(this);
   }
+
+  /** The network drops the connection: both ends see it close. */
+  sever() {
+    const other = this.other;
+    this.network.deliver(() => {
+      this.remoteClosed();
+      other.remoteClosed();
+    });
+  }
 }
 
 export class LoopbackTransport extends Transport {
@@ -139,6 +148,11 @@ export class LoopbackTransport extends Transport {
     const conn = this.conn;
     this.conn = null;
     conn?.close();
+  }
+
+  /** Tests: the network drops the current connection under both ends. */
+  sever() {
+    this.conn?.sever();
   }
 
   close(message) {

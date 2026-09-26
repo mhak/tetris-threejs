@@ -24,6 +24,10 @@ export class Lobby {
     this.nameInput = $('lobby-name');
     this.hostBox = $('lobby-host');
     this.codeText = $('room-code');
+    this.shareButton = $('lobby-share');
+    this.qr = $('lobby-qr');
+    this.shareNote = $('share-note');
+    this.joinUrl = null;
     this.joinBox = $('lobby-join');
     this.codeInput = $('lobby-code');
     this.joinButton = $('lobby-join-go');
@@ -56,6 +60,7 @@ export class Lobby {
       this.submitJoin();
     });
     this.cancelButton.addEventListener('click', () => this.onCancel?.());
+    this.shareButton.addEventListener('click', () => this.share());
     // Keep clicks in the panel away from the overlay's "tap to start solo".
     this.panel.addEventListener('click', (e) => e.stopPropagation());
   }
@@ -80,6 +85,10 @@ export class Lobby {
     this.hostBox.hidden = mode !== 'create';
     this.joinBox.hidden = mode !== 'join';
     this.codeText.textContent = '';
+    this.shareButton.hidden = true;
+    this.qr.hidden = true;
+    this.shareNote.textContent = '';
+    this.joinUrl = null;
     this.setStatus('');
     this.panel.hidden = false;
   }
@@ -121,8 +130,42 @@ export class Lobby {
     this.nameInput.disabled = true;
   }
 
-  showCode(code) {
+  /** The host's code, with a share button and a QR code of the join link. */
+  showCode(code, joinUrl) {
+    if (this.joinUrl === joinUrl) return;
     this.codeText.textContent = code;
+    this.joinUrl = joinUrl;
+    this.shareButton.hidden = false;
+    // Only loaded when a room is created, so solo play never downloads it.
+    import('lean-qr')
+      .then(({ generate }) => {
+        if (this.joinUrl !== joinUrl) return;
+        generate(joinUrl).toCanvas(this.qr, { on: [0, 0, 0, 255], off: [255, 255, 255, 255], pad: 2 });
+        this.qr.hidden = false;
+      })
+      .catch(() => {
+        // No QR code; the code and the share link still work.
+      });
+  }
+
+  /** Web Share where there is one, else copy the link. */
+  async share() {
+    const url = this.joinUrl;
+    if (!url) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ url });
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return; // the player closed the share sheet
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      this.shareNote.textContent = 'LINK COPIED';
+    } catch {
+      this.shareNote.textContent = url;
+    }
   }
 
   setStatus(text, tone = '') {
