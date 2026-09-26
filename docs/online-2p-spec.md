@@ -1,6 +1,6 @@
 # Spec: online 2-player versus with a join code
 
-Status: draft, decisions from review added (section 10)
+Status: draft, decisions from two reviews added (section 10)
 Scope: play the existing versus rules on two different devices (phone, tablet
 or desktop, in any mix). One player creates a room and gets a short join code;
 the other enters the code, opens a share link or scans a QR code.
@@ -17,8 +17,9 @@ prototype before we commit to them.
 - Joining takes one short code, a link or a QR scan. No accounts, no sign-in.
 - Nothing new to host. The site stays a static build on GitHub Pages.
 - Rematch in the same room without a new code.
-- A dropped connection (phone locks, Wi-Fi blip, page reload) can recover
-  within a grace period.
+- A dropped connection (phone locks, Wi-Fi blip) can recover within a grace
+  period. A page reload keeps the room and the win counter but loses the
+  current round.
 - Each device shows its own well full size and the opponent's well as a small
   live view, so it fits a phone.
 - Both players get the same piece sequence each round, so neither gets luckier
@@ -48,6 +49,19 @@ The start overlay (`#start` in `index.html`) gets three choices:
 
 "Press any key / tap to start" keeps starting Solo, so the current one-tap flow
 is not slower. The two online buttons sit below it.
+
+Keyboard and clicks on the start screen need two changes, or the lobby can't
+be used:
+- Today any key (`input.onAnyInput`) or any click on the overlay starts Solo
+  (`src/main.js`). Clicks on the online buttons must not reach that handler,
+  and the shortcut is off while the Create / Join panel is open.
+- `Input` calls `preventDefault()` on every game key for the whole window
+  (`src/game/input.js`), which would block typing A, C, D, E, F, K, L, Q, R, S,
+  W, Z and space into the name and code fields. `Input` ignores key events
+  whose target is a text field (`input`, `textarea`).
+
+Until the online mode is finished (milestone 6), the two online buttons only
+show with `?online=1` in the address, because every merge to `main` deploys.
 
 ### 2.1a Player name
 
@@ -89,23 +103,34 @@ is not slower. The two online buttons sit below it.
 3. Errors shown on the join screen:
    - "No room with that code" (host not found)
    - "Room is full" (host already has an opponent)
-   - "Couldn't connect" (peer connection failed, see 4.4)
-   - "Your opponent is on a different version. Reload the page." (protocol mismatch)
+   - "Couldn't connect" (peer connection failed, or no open channel after
+     15 s, see 4.4)
+   - "Your opponent is on a different version. Reload the page." (build ID
+     mismatch, see 6)
 
 After joining, the `?join=` parameter is removed from the address bar with
-`history.replaceState`, so a reload doesn't try to join a finished room.
+`history.replaceState`, so a reload doesn't try to join a finished room. A
+`?join=` link works without `?online=1`.
 
 ### 2.4 During the match
 
 - Each player controls only their own well, with the same touch, keyboard and
   gamepad controls as today. On desktop both keyboard layouts control the local
   player, so either set of keys works.
+- On each device the local player is board 0 and the opponent's `RemoteField`
+  is board 1. Touch input only feeds board 0 (`getState` in `src/main.js`).
 - **Use power** now has a target: Add Line and Drop hit the opponent. The solo
   power list (`SOLO_POWERS` in `gameScreen.js`) is not used online.
 - **Pause** pauses both devices. Resuming shows a 3-2-1 countdown on both.
   Either player can pause and resume.
 - Going to the background (`visibilitychange`) pauses the match for both, as
-  solo play does today.
+  solo play does today, by sending `{ t: 'pause', reason: 'hidden' }`.
+- The Pause button has no time limit (5.6), but being in the background can
+  have one. A background tab stops `requestAnimationFrame` and slows its
+  timers, and iOS may suspend the page altogether. **(low confidence)** on
+  how fast each browser does this. If the other side stops hearing from it,
+  it shows "Reconnecting..." after 5 s, and after the 30 s grace the player
+  who left forfeits (2.6).
 
 ### 2.5 End of round and rematch
 
@@ -113,7 +138,8 @@ After joining, the `?join=` parameter is removed from the address bar with
   names, e.g. `ALEX WINS` over the winner's well, or `DRAW` (see 5.5).
 - Each player presses Start (or taps) to say "ready for a rematch". The screen
   shows "Waiting for opponent..." until both are ready, then a countdown and a
-  new round in the same room.
+  new round in the same room. Online, that press only sends `ready`; the
+  round restarts when the host's `start` arrives, never locally (5.1).
 - A win counter with names (e.g. `ALEX 2 - 1 SAM`) is shown for the life of
   the room.
 - **Leave** returns to the start screen and tells the opponent, who sees
@@ -122,13 +148,27 @@ After joining, the `?join=` parameter is removed from the address bar with
 ### 2.6 Disconnect and reconnect
 
 - If the data channel closes or no message arrives for 5 s, both sides pause
-  and show "Reconnecting..." with a countdown from 30 s.
+  and show "Reconnecting..." with a countdown from 30 s. This works in any
+  room state, not just during play (see the state machine in 7).
 - The guest retries connecting to the host's code. The host keeps its broker
   registration (or re-registers the same code after a reload, see 4.5).
 - If the connection comes back inside the grace period, the round resumes with
   a 3-2-1 countdown.
-- If not, the player still connected wins by forfeit and gets a button back to
-  the start screen.
+- A page reload keeps the room and the win counter, but the player who
+  reloaded loses the current round (4.5). The page shows **Tap to rejoin**
+  first, because audio needs a user gesture again.
+- If the grace period runs out, the room ends and each side decides the
+  outcome on its own, since no message can get through:
+  - If the opponent sent `pause` with `reason: 'hidden'` and no `resume`
+    since, the opponent went to the background and forfeits: "<NAME> LEFT,
+    YOU WIN".
+  - The player who was in the background, on coming back to a lost
+    connection, sees "YOU LEFT, YOU LOSE". A page can tell it was away from
+    how long `document.hidden` was true.
+  - Otherwise (a network outage, neither side was hidden) both see
+    "CONNECTION LOST" and no one wins. Without this rule, both sides of an
+    outage would each think the other one left and both claim the win.
+  - Every case shows a button back to the start screen.
 
 ## 3. Screen layout
 
@@ -155,7 +195,9 @@ confidence)** that 30% scale is still readable on a small phone.
 Renderer changes: `Renderer` currently assumes every board has the same layout
 and spreads them evenly (`applyLayout`). It needs a per-board layout and scale,
 e.g. `new Renderer(app, [{ layout: 'auto' }, { layout: 'mini' }])`, plus a
-`mini` entry in `LAYOUTS`.
+`mini` entry in `LAYOUTS`. Today `drawPlayer()` reads `shadowY`, `heldPiece`
+and `nextPiece` from every field; the `mini` layout skips the ghost, hold and
+next, so `RemoteField` doesn't need to provide them.
 
 ## 4. Networking
 
@@ -177,7 +219,8 @@ Risks:
 - WebRTC without a TURN relay fails on some networks (symmetric NAT, some
   mobile carriers, strict corporate Wi-Fi). **(low confidence)** on how often
   this happens for our players; I have seen estimates from roughly 10% to 20%
-  of connections but have not verified them. Mitigation in 4.4.
+  of connections but have not verified them. PeerJS's default settings
+  include a free relay that should cover most of these (4.4).
 
 ### 4.2 Join code
 
@@ -190,11 +233,20 @@ Risks:
   times.
 - The guest gets a random PeerJS ID (no code needed).
 - Codes are not secret. Anyone with the code can join an empty room. The host
-  accepts only the first guest and rejects others with `{ t: 'full' }`.
+  accepts only the first guest and rejects others with `{ t: 'full' }`, then
+  closes with `conn.close({ flush: true })` so the message is delivered before
+  the channel closes.
+- While reconnecting, the host lets the guest back in only if its `hello`
+  carries the room's resume `token` (4.5). That also covers a reloaded guest,
+  which comes back with a new random peer ID.
 
 ### 4.3 Share link and QR
 
-- Join link: `location.origin + import.meta.env.BASE_URL + '?join=' + code`.
+- Join link: built from the current page address, e.g.
+  `const url = new URL(location.href); url.search = '?join=' + code; url.hash = '';`.
+  Not from `import.meta.env.BASE_URL`: `vite.config.js` sets `base: './'`, so
+  in the build it is `./` and `location.origin + BASE_URL` gives
+  `https://<host>./?join=...`, which drops the `/tetris-threejs/` path.
 - **Share**: `navigator.share({ url })` where supported, else copy the link with
   `navigator.clipboard.writeText` and show "Link copied".
 - QR code: generated on the client. Add a small QR library (e.g. `qrcode` or
@@ -203,26 +255,51 @@ Risks:
 
 ### 4.4 ICE servers
 
-- STUN: Google's public STUN servers (the PeerJS default).
-- TURN: none. Decision: no relay server, so nothing to host and no
-  credentials to manage. If the connection fails, show "Couldn't connect. Try
-  both devices on the same Wi-Fi."
+- Keep PeerJS's default `config.iceServers` and don't override it. In peerjs
+  1.5.5 the default is Google's STUN server plus a free TURN relay run by the
+  PeerJS project (`eu-0.turn.peerjs.com` and `us-0.turn.peerjs.com`, with
+  shared public credentials). Decision: use it. Nothing to host and no
+  credentials of our own, and it covers networks where a direct connection
+  fails. **(low confidence)** on how reliable and fast that relay is; like the
+  broker, it is a free community service with no uptime promise.
+- The first draft said the PeerJS default was STUN only. That was wrong:
+  "no TURN" would have meant removing the relay on purpose.
+- A join that has no open channel after 15 s fails with "Couldn't connect.
+  Try both devices on the same Wi-Fi." PeerJS reports an ICE failure itself
+  (`negotiation-failed`), but **(low confidence)** on how long browsers take
+  to give up, so the timeout doesn't rely on it.
 
 ### 4.5 Reconnect details
 
 - A PeerJS `Peer` that loses the broker connection (`disconnected` event) calls
   `peer.reconnect()`, which keeps the same ID.
-- A data channel that closes: the guest calls `peer.connect(hostId)` again every
-  2 s during the grace period.
-- Host page reload: the room code and round state are kept in `sessionStorage`
-  (per tab). On load, if there is a live room, the host re-registers the same
-  peer ID. **(low confidence)** that the broker frees the old ID fast enough;
-  if it doesn't, the host retries until the grace period ends.
-- Guest page reload: the code is kept in `sessionStorage` too, and the guest
-  rejoins with a `resume` flag.
-- On reconnect, the round continues from each side's current board. Each
-  device owns its own board (5.1), so there is nothing to replay: the local
-  board was paused, and the opponent sends a fresh snapshot.
+- A data channel that closes, or goes 5 s without a message: the guest closes
+  it and calls `peer.connect(hostId)` again every 2 s during the grace period.
+- Liveness comes from `ping` (6), sent from a `setInterval` timer, not from
+  the `requestAnimationFrame` loop, which stops in a background tab.
+- Resume token: the host's `hello` carries a random `token`. A guest that
+  reconnects sends it back in its own `hello`. While reconnecting, the host
+  accepts a `hello` with the right token, closes the old connection and
+  carries on; anything else gets `full`.
+- On reconnect without a reload, the round continues from each side's current
+  board. Each device owns its own board (5.1), so there is nothing to replay:
+  the local board was paused, and the opponent sends a fresh snapshot.
+
+Page reload. Decision: a reload keeps the room and the win counter but loses
+the current round. The board itself is not saved, because a restored board
+would also need the piece generator's exact position, or that player's
+pieces would stop matching the opponent's (5.4).
+- `sessionStorage` (per tab) keeps: role, room code, both names, resume
+  token, win counter and round number. Nothing about the board.
+- Host reload: on load, if there is a live room, the host re-registers the
+  same peer ID. **(low confidence)** that the broker frees the old ID fast
+  enough; if it doesn't, the host retries until the grace period ends.
+- Guest reload: the guest gets a new random peer ID and rejoins with the
+  saved token.
+- After reconnecting, a reload counts as topping out: the reloaded side sends
+  `over` for the interrupted round (a reloaded host applies its own `over`),
+  and the result follows the normal rules in 5.5. If the round was already
+  over, both go straight to the rematch screen.
 
 ### 4.6 Transport interface
 
@@ -231,7 +308,7 @@ Risks:
 // A transport moves JSON messages between exactly two peers.
 export class Transport {
   host(code) {}          // Promise<void>; rejects with { code: 'taken' }
-  join(code) {}          // Promise<void>; rejects with { code: 'not-found' | 'full' | 'failed' }
+  join(code) {}          // Promise<void>; rejects with { code: 'not-found' | 'full' | 'failed' } ('failed' also after 15 s)
   send(message) {}       // reliable, ordered
   close() {}
   onMessage = (msg) => {};
@@ -259,10 +336,24 @@ Why this model:
 - No input lag on your own board, which matters most in Tetris.
 - No lockstep or rollback. The only shared effects are attacks, and a
   50 to 150 ms delay on an incoming garbage line is not noticeable.
-- The existing `GameScreen` / `TetrisField` code runs almost unchanged.
+- The existing `TetrisField` code runs almost unchanged.
 
 The cost is that we trust each client for its own board. That is fine for a
 friends-only game (see non-goals).
+
+`GameScreen` needs an `online` mode, because today it ends and restarts
+rounds on its own:
+- It marks a player the winner as soon as every other field is game over,
+  and `allOut` shows a draw. Online, a `RemoteField` turns game over as soon
+  as a snapshot says `over`, so the local screen would show a result before
+  the host decides it (5.5).
+- Start (or a tap, `src/main.js`) after a round calls `restartGame()` locally,
+  which would skip the rematch handshake (2.5).
+
+In `online` mode, `GameScreen` doesn't set `isWinner`, doesn't treat `allOut`
+as a result and never calls `restartGame()` itself. The session shows the
+result from the host's `result` message, turns Start into `ready` and starts
+each round from the host's `start` message.
 
 ### 5.2 Attacks
 
@@ -272,12 +363,16 @@ become online:
 | Local event | Today (`gameScreen.js`) | Online |
 | --- | --- | --- |
 | Clear 4 lines | `opponent.addLine()` | send `{ t: 'attack', kind: 'line' }` |
-| Use Add Line | `opponent.addLine()` | send `{ t: 'attack', kind: 'addLine' }` |
+| Use Add Line | `opponent.addLine()` | send `{ t: 'attack', kind: 'line' }` |
 | Use Drop | `opponent.movePieceHardDrop()` + `boom` | send `{ t: 'attack', kind: 'drop' }`, play `boom` locally |
 
+A Tetris and Add Line are one message kind. Both call the same
+`opponent.addLine()` (see `RemoteField` below), so the sender can't tell them
+apart, and they have the same effect on the receiver.
+
 On receive:
-- `line` / `addLine`: `field.addLine()`. The gap column is picked by the
-  receiver's own random source.
+- `line`: `field.addLine()`. The gap column is picked by the receiver's own
+  random source.
 - `drop`: `field.movePieceHardDrop()`, play `boom`, camera shake.
 - Ignored if the receiver is already game over, not in a round, or the
   message's round number is old.
@@ -296,20 +391,22 @@ A snapshot has what the mini board and score need:
 ```js
 {
   t: 'state',
-  round: 3,
-  seq: 1042,             // increases per snapshot; drop older ones
+  round: 3,              // snapshots from an old round are ignored
   field: '0000...2211',  // 200 chars, one base-36 digit per cell (values 0..11)
-  piece: { kind: 'T', rot: 1, x: 3, y: 7 },  // null between pieces
+  piece: { kind: 'T', rot: 1, x: 3, y: 7 },  // null after top out
   powers: [8, 11],
-  score: 1200, lines: 14, level: 1,
+  score: 1200, lines: 14,  // level is worked out from lines, as in TetrisField
   over: false,
 }
 ```
 
-- Sent when anything in it changes, at most 20 times per second, plus once per
-  second as a heartbeat. About 300 bytes each, so under 10 KB/s.
+- Sent when anything in it changes, at most 20 times per second. About 300
+  bytes each, so under 10 KB/s. No heartbeat snapshot: `ping` does that job.
+- No sequence number. The channel is reliable and ordered, so snapshots can't
+  arrive out of order, and a counter would break after a reload: the reloaded
+  side would start again from 0 and every new snapshot would look old.
 - The receiver copies it into `RemoteField`; the renderer draws `RemoteField`
-  like any other field. No interpolation.
+  with the `mini` layout (3). No interpolation.
 
 ### 5.4 Round start and randomness
 
@@ -331,8 +428,11 @@ So there are two streams:
 | `random` | `spawnRandomPower()`, `addLine()` gap | `Math.random`, per device |
 
 - Add a small seeded PRNG (e.g. mulberry32, about 10 lines) in
-  `src/game/random.js`. Both devices run the same JS build (the protocol
-  version check makes sure of it), so the same seed gives the same numbers.
+  `src/game/random.js`. The same seed only gives the same pieces if both
+  devices generate pieces the same way: same PRNG, same `TETROMINO_KINDS`
+  order, same `generatePiece()`. A protocol version number bumped by hand
+  could miss a change to any of these, so `hello` compares a build ID instead
+  (6), and both devices always run the same JS build.
 - `TetrisField` takes a new `pieceRandom` option that defaults to `random`, so
   solo and local 2-player behave exactly as today.
 - `GameScreen` takes a `pieceSeed` option and gives each local field its own
@@ -350,19 +450,26 @@ So there are two streams:
 - When the local player tops out, it sends `{ t: 'over', round }`.
 - The host decides the result, so both screens always agree:
   - First `over` the host sees (its own, or the guest's on receipt) loses.
-  - If the other side also tops out within 250 ms, the round is a draw. This
-    mirrors the local rule "both top out in the same frame = draw".
+  - After the first `over`, the host waits 250 ms. If the other side also
+    tops out in that time, the round is a draw. This is close to the local
+    rule "both top out in the same frame = draw".
   - The host sends `{ t: 'result', round, winner: 'host' | 'guest' | 'draw' }`.
+- Known bias: the host sees its own `over` at once but the guest's only after
+  the network delay, so a close finish tilts against the host. With a 250 ms
+  window it only matters on slow links. Decision: accept it for a friends-only
+  game rather than sync clocks.
 - Until the result arrives, the guest keeps playing if it hasn't topped out.
-  In practice the result arrives within one round trip.
-- Forfeit on a lost connection (2.6) uses the same message with
-  `reason: 'forfeit'`.
+  In practice the result arrives within one round trip plus 250 ms.
+- A lost connection can't use `result`, because no message gets through. Each
+  side decides that outcome itself (2.6).
 
 ### 5.6 Pause
 
 - `{ t: 'pause' }` and `{ t: 'resume' }`. Either side can send either one.
 - No limit on how many times or how long a player can pause. Decision: the
-  game is played between friends, so stalling isn't a concern.
+  game is played between friends, so stalling isn't a concern. This covers
+  the Pause button only; a page in the background loses its connection and
+  forfeits after the grace period (2.4, 2.6).
 - On `resume`, both run a 3 s countdown before input and gravity restart.
 - `GameScreen.pause` is set from the network as well as from the Start button.
 
@@ -373,21 +480,25 @@ ordered data channel.
 
 | Type | Direction | Fields | Meaning |
 | --- | --- | --- | --- |
-| `hello` | both | `v`, `name`, `resume?` | First message. `v` is the protocol version, `name` the player name (2.1a). |
+| `hello` | both | `v`, `name`, `token?` | First message. `v` is the build ID, `name` the player name (2.1a). The host's `hello` carries a new resume `token`; a reconnecting guest sends it back (4.5). |
 | `full` | host to guest | | Room already has a guest. |
-| `version` | both | `v` | Versions don't match; show the reload message. |
+| `version` | both | `v` | Build IDs don't match; show the reload message. |
 | `start` | host to guest | `round`, `seed`, `countdownMs` | Start a round with this piece seed (5.4). |
 | `state` | both | see 5.3 | Board snapshot. |
-| `attack` | both | `round`, `kind` | `line`, `addLine` or `drop`. |
-| `over` | both | `round` | Sender topped out. |
-| `result` | host to guest | `round`, `winner`, `reason?` | Round result. |
+| `attack` | both | `round`, `kind` | `line` or `drop` (5.2). |
+| `over` | both | `round` | Sender topped out, or reloaded mid-round (4.5). |
+| `result` | host to guest | `round`, `winner` | Round result. |
 | `ready` | both | `round` | Ready for a rematch. |
-| `pause` / `resume` | both | | Pause both / resume both. |
-| `ping` / `pong` | both | `ts` | Every 1 s; used for "lost" detection and a latency readout. |
+| `pause` / `resume` | both | `reason?` | Pause both / resume both. `pause` has `reason: 'hidden'` when the sender went to the background (2.6). |
+| `ping` / `pong` | both | `ts` | Every 1 s from a timer; the only liveness signal ("lost" after 5 s) and a latency readout. |
 | `bye` | both | | Player left the room. |
 
-`PROTOCOL_VERSION` starts at 1. Bump it on any breaking change. A page cached
-from an old deploy then shows the reload message instead of desyncing.
+The build ID is the deployed commit, injected at build time with Vite's
+`define` (e.g. `__BUILD_ID__` from `GITHUB_SHA` in the deploy workflow, `dev`
+otherwise). Two devices play only if their IDs match, so a page cached from an
+old deploy shows the reload message instead of desyncing, and nobody has to
+remember to bump a version number. `hello` and `version` must keep their shape
+forever, so any two builds can at least tell each other they differ.
 
 ## 7. Code layout
 
@@ -400,7 +511,7 @@ New files:
 | `src/net/joinCode.js` | Code generation, validation, peer ID prefix |
 | `src/net/playerName.js` | Name rules, cleaning, saved name |
 | `src/game/random.js` | Seeded PRNG for the shared piece sequence |
-| `src/net/protocol.js` | Message types, `PROTOCOL_VERSION`, field encoding |
+| `src/net/protocol.js` | Message types, build ID, field encoding |
 | `src/net/session.js` | Room state machine (below) |
 | `src/game/remoteField.js` | Read-only opponent field plus attack forwarding |
 | `src/ui/lobby.js` | Create / join / share / QR screens |
@@ -409,10 +520,12 @@ Changed files:
 
 | File | Change |
 | --- | --- |
-| `src/main.js` | Mode select (solo / host / guest), builds `GameScreen` with a `RemoteField` online |
-| `src/game/gameScreen.js` | Skip remote players in `update()`; `onAttack` / `onOver` hooks; round number; `pieceSeed` option |
+| `src/main.js` | Mode select (solo / host / guest), builds `GameScreen` with a `RemoteField` online; no Solo shortcut while the lobby is open; `?online=1` flag |
+| `src/game/input.js` | Ignore key events from text fields |
+| `src/game/gameScreen.js` | Skip remote players in `update()`; `online` mode with no local result or restart; `onAttack` / `onOver` hooks; round number; `pieceSeed` option |
 | `src/game/tetrisField.js` | `pieceRandom` option used only by `generatePiece()` |
-| `src/render/renderer.js` | Per-board layout and scale, `mini` layout, attack flash |
+| `src/render/renderer.js` | Per-board layout and scale, `mini` layout without ghost / hold / next, attack flash |
+| `vite.config.js` | `define` the build ID |
 | `index.html`, `src/style.css` | Start screen buttons, lobby panel, status banners |
 | `README.md` | How to play online |
 
@@ -422,9 +535,13 @@ Room state machine (`session.js`):
 idle -> hosting -> waiting -> countdown -> playing -> roundOver -> countdown ...
 idle -> joining -> countdown
 playing <-> paused
-playing | paused -> reconnecting -> (countdown | forfeit)
-any -> closed (bye, cancel, fatal error)
+countdown | playing | paused | roundOver -> reconnecting -> (countdown | roundOver | closed)
+any -> closed (bye, cancel, fatal error, grace period over)
 ```
+
+`reconnecting` goes back to `roundOver` when it was entered from there, or
+when a reload lost the round (4.5). Otherwise it goes to `countdown` and the
+round resumes.
 
 ## 8. Testing
 
@@ -437,18 +554,27 @@ Automated (`npm test`, `node:test`, no browser):
   pieces even when one gets garbage lines, power spawns and holds and the
   other doesn't; a different seed gives a different sequence; without a seed,
   `TetrisField` still uses `random` for pieces (existing tests keep passing).
-- `RemoteField`: applies snapshots, drops stale `seq`, forwards attacks.
+- `RemoteField`: applies snapshots, ignores snapshots from an old round,
+  forwards attacks.
+- `Input`: keys typed into a text field are not blocked or turned into game
+  input.
+- `GameScreen` in `online` mode: the opponent topping out doesn't make the
+  local player the winner, and Start after a round doesn't restart it.
 - `GameScreen` with two `LoopbackTransport` ends: a Tetris on one side adds a
   garbage line on the other; Add Line and Drop powers; top-out gives the same
   result on both sides; simultaneous top-out is a draw; pause and resume reach
   both sides; attacks from an old round are ignored.
-- Session: reconnect inside the grace period resumes; after it, forfeit.
+- Session: reconnect inside the grace period resumes; a reload rejoins with
+  the token and loses the round; a wrong token gets `full`; after the grace
+  period, the side that went to the background loses and a plain outage ends
+  with no winner.
 
 Manual matrix before release:
 - iOS Safari + Android Chrome, desktop Chrome + phone, desktop Firefox + Safari.
 - Same Wi-Fi; one on cellular; both on cellular.
-- Lock the phone mid-round and unlock within 30 s, and after 30 s.
-- Reload the host tab mid-round.
+- Lock the phone mid-round and unlock within 30 s, and after 30 s. Same with
+  switching to another app.
+- Reload the host tab mid-round, and the guest tab.
 - Open the share link and the QR code from a phone camera.
 
 ## 9. Milestones
@@ -463,7 +589,9 @@ Manual matrix before release:
 5. **Room features**: rematch and score counter, share link, QR, reconnect.
 6. **Polish**: error messages, README, manual test matrix.
 
-Each milestone is a separate PR that keeps solo play working.
+Each milestone is a separate PR that keeps solo play working. Every merge to
+`main` deploys, so the online buttons stay behind `?online=1` until
+milestone 6 (2.1).
 
 ## 10. Decisions
 
@@ -472,9 +600,25 @@ Answers to the open questions from the first draft:
 | Question | Decision | Where |
 | --- | --- | --- |
 | Same piece sequence for both players? | Yes, seeded per round | 5.4 |
-| Limit pauses? | No, unlimited | 5.6 |
+| Limit pauses? | No, unlimited (Pause button only) | 5.6 |
 | Public PeerJS broker for launch? | Yes | 4.1 |
-| TURN relay for failed connections? | No | 4.4 |
+| TURN relay for failed connections? | Changed in the second review, see below | 4.4 |
 | Player names? | Yes | 2.1a, 3 |
+
+Second review, after checking the spec against the code and peerjs 1.5.5:
+
+| Question | Decision | Where |
+| --- | --- | --- |
+| TURN relay? | Use the free PeerJS relay in PeerJS's default settings. The first draft thought the default had no relay. | 4.4 |
+| Page reload mid-round? | Keep the room and win counter; the reloaded player loses the round | 2.6, 4.5 |
+| Background for more than 30 s? | The player who left forfeits; a plain outage ends with no winner | 2.4, 2.6 |
+| Same code on both devices? | `hello` compares a build ID, not a hand-bumped version | 5.4, 6 |
+| Close top-outs favour the guest by the network delay? | Accepted | 5.5 |
+| Tetris vs. Add Line message? | One kind, `line` | 5.2 |
+
+Fixed in the second review (spec was wrong about the code): typing in the
+lobby (2.1), the share link URL (4.3), `GameScreen` deciding results itself
+(5.1), `drawPlayer()` needing ghost / hold / next (3), the snapshot sequence
+number (5.3).
 
 No open questions left. New ones found while building go here.
