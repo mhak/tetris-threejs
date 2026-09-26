@@ -17,6 +17,14 @@ npm run build    # static build in dist/
 npm test         # game-logic tests (node:test)
 ```
 
+## Deploying
+
+`.github/workflows/deploy.yml` builds and tests every pull request, and deploys
+to GitHub Pages on every push to `main` (or a manual run from the Actions tab).
+One-time setup: in the repository's **Settings > Pages**, set **Source** to
+**GitHub Actions**. The site is then served at
+`https://<owner>.github.io/tetris-threejs/`.
+
 ## What was ported
 
 | Original (C#) | Port |
