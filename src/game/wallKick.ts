@@ -1,4 +1,3 @@
-// Port of Tetris/GameLogic/WallKick.cs
 // Each row is indexed by the piece orientation after rotation; entries are [x, y].
 export type KickTable = readonly (readonly (readonly [number, number])[])[];
 

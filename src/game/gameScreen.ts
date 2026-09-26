@@ -1,4 +1,4 @@
-// Port of Tetris/Screens/GameScreen.cs (game rules, input handling, powers).
+// Game rules, input handling and powers.
 // Rendering lives in src/render; audio playback in src/audio.ts.
 import { Block } from './block.ts';
 import { TetrisField, type Sounds, type TetrisFieldOptions } from './tetrisField.ts';

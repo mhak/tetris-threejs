@@ -1,4 +1,3 @@
-// Port of Tetris/Models/TetrisField.cs
 import { Block } from './block.ts';
 import { TETROMINO_KINDS, createTetromino, type Tetromino } from './tetromino.ts';
 import {
@@ -391,8 +390,7 @@ export class TetrisField {
         ? this.powerList[this.powerList.length - 1]
         : this.powerList[this.randomInt(this.powerList.length - 1)];
 
-    // The original re-rolled random cells until it hit a normal block; picking
-    // from the candidates directly is equivalent and can't loop forever.
+    // Pick from the candidate cells directly so this can't loop forever.
     const candidates: [number, number][] = [];
     for (let y = 0; y < Height; y++) {
       for (let x = 0; x < Width; x++) {

@@ -1,13 +1,11 @@
 # tetris-threejs
 
-A Three.js port of [mhak/tetris](https://github.com/mhak/tetris), the two-player
-MonoGame versus Tetris. It runs as a **single-player** game built for phones as
-well as desktop, and as **online versus** between two devices with a join code
-(see [Playing online](#playing-online)). Local 2-player on one device is
-switched off for now (set `PLAYER_COUNT` to 2 in `src/main.ts` and uncomment
-the P2 controls in `index.html` to bring it back). The game rules are ported
-one-to-one from the C# code; rendering is now a 3D scene with textured cubes,
-glass-style wells and a slowly drifting camera.
+A versus Tetris built with Three.js. It runs as a **single-player** game built
+for phones as well as desktop, and as **online versus** between two devices
+with a join code (see [Playing online](#playing-online)). Local 2-player on one
+device is switched off for now (set `PLAYER_COUNT` to 2 in `src/main.ts` and
+uncomment the P2 controls in `index.html` to bring it back). It renders a 3D
+scene with textured cubes, glass-style wells and a slowly drifting camera.
 
 ## Running
 
@@ -84,53 +82,35 @@ page like this one the meta tag is what takes effect; `robots.txt` applies if
 the site is ever served from its own domain. Neither one hides the site from
 people who have the link.
 
-## What was ported
+## Gameplay
 
-| Original (C#) | Port |
-| --- | --- |
-| `Models/TetrisField.cs` | `src/game/tetrisField.ts` |
-| `Models/Tetrinoms/*.cs` | `src/game/tetromino.ts` |
-| `GameLogic/WallKick.cs` | `src/game/wallKick.ts` |
-| `Models/Block.cs` | `src/game/block.ts` |
-| `Screens/GameScreen.cs` (rules, input, powers) | `src/game/gameScreen.ts` |
-| `Screens/GameScreen.cs` (drawing) | `src/render/renderer.ts` |
-| MonoGame `GamePad` | `src/game/input.ts` (Gamepad API + keyboard) |
-| `SoundEffect` / `MediaPlayer` | `src/audio.ts` (Web Audio + `<audio>`) |
-| `Content/` | `public/assets/` |
+Hold, next, ghost piece, SRS-style wall kicks, a Tetris sends a garbage line to
+the opponent, and power blocks (add line, clear line, drop, left slide) that
+spawn every 4 cleared lines and are collected by clearing the row they sit in.
 
-Online play is new: `src/net/` (transport, PeerJS, join codes, names,
-protocol, room session), `src/game/remoteField.ts`, `src/game/random.ts` and
-`src/ui/` (lobby and in-match status).
-
-Gameplay is the same: 2 players, hold, next, ghost piece, SRS-style wall kicks,
-a Tetris sends a garbage line to the opponent, and power blocks (add line,
-clear line, drop, left slide) that spawn every 4 lines and are collected by
-clearing the row they sit in.
-
-Intentional differences:
-
-- Touch controls and a phone layout: on a tall screen the score, hold and next
-  sit in a compact HUD above the well, and the buttons are at the bottom (or on
-  the right when the phone is sideways).
+- On a tall screen the score, hold and next sit in a compact HUD above the
+  well, and the touch buttons are at the bottom (or on the right when the
+  phone is sideways).
 - In single-player only the Clear Line and Left Slide powers spawn, since Add
-  Line and Drop hit the opponent. All four come back in 2-player and online play.
-- Keyboard controls were added (gamepads still work).
+  Line and Drop hit the opponent. All four spawn in 2-player and online play.
 - A start screen is shown first, because browsers only allow audio after a user gesture.
   If you start with a controller, sound begins after the first key press or click.
-- Bugs from the original were fixed:
-  - A garbage line, or your own Clear Line / Left Slide power, no longer ends the
-    game when it shifts blocks under the falling piece; the piece is pushed up instead.
-  - Game over happens only when a piece locks with cells above the well (or a new
-    piece can't spawn), not whenever a piece's empty top rows stick out.
-  - A piece swapped in from hold spawns at the normal spawn row, and held pieces
-    return to their spawn rotation.
-  - The ghost piece is always up to date (it used to float too high after a line clear).
-  - The power counter counts cleared rows correctly, so a power spawns every
-    4 cleared lines (rows that paid out a power don't count).
-  - If both players top out in the same frame the round is a draw and Start restarts it.
-  - Powers no longer affect players who are already out.
-  - `SpawnRandomPower` picks from the valid cells directly, so it can't hang.
-- `Arcade.wav` and the two line-clear sounds were re-encoded as MP3 (19 MB to 2.6 MB).
+- A garbage line, or your own Clear Line / Left Slide power, pushes the falling
+  piece up instead of ending the game.
+- Game over happens when a piece locks with cells above the well, or a new
+  piece can't spawn.
+- If both players top out in the same frame the round is a draw and Start restarts it.
+
+## Code layout
+
+| Path | What it does |
+| --- | --- |
+| `src/game/` | Game rules: field, pieces, wall kicks, powers, input |
+| `src/render/` | Three.js scene and HUD text |
+| `src/audio.ts` | Music and sound effects (Web Audio + `<audio>`) |
+| `src/net/` | Online play: transport, PeerJS, join codes, names, protocol, room session |
+| `src/ui/` | Lobby and in-match status |
+| `public/assets/` | Textures, backgrounds, music and sound effects |
 
 ## Controls
 
