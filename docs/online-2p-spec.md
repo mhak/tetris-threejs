@@ -54,10 +54,10 @@ is not slower. The two online buttons sit below it.
 Keyboard and clicks on the start screen need two changes, or the lobby can't
 be used:
 - Today any key (`input.onAnyInput`) or any click on the overlay starts Solo
-  (`src/main.js`). Clicks on the online buttons must not reach that handler,
+  (`src/main.ts`). Clicks on the online buttons must not reach that handler,
   and the shortcut is off while the Create / Join panel is open.
 - `Input` calls `preventDefault()` on every game key for the whole window
-  (`src/game/input.js`), which would block typing A, C, D, E, F, K, L, Q, R, S,
+  (`src/game/input.ts`), which would block typing A, C, D, E, F, K, L, Q, R, S,
   W, Z and space into the name and code fields. `Input` ignores key events
   whose target is a text field (`input`, `textarea`).
 
@@ -119,9 +119,9 @@ After joining, the `?join=` parameter is removed from the address bar with
   gamepad controls as today. On desktop both keyboard layouts control the local
   player, so either set of keys works.
 - On each device the local player is board 0 and the opponent's `RemoteField`
-  is board 1. Touch input only feeds board 0 (`getState` in `src/main.js`).
+  is board 1. Touch input only feeds board 0 (`getState` in `src/main.ts`).
 - **Use power** now has a target: Add Line and Drop hit the opponent. The solo
-  power list (`SOLO_POWERS` in `gameScreen.js`) is not used online.
+  power list (`SOLO_POWERS` in `gameScreen.ts`) is not used online.
 - **Pause** pauses both devices. Resuming shows a 3-2-1 countdown on both.
   Either player can pause and resume.
 - Going to the background (`visibilitychange`) pauses the match for both, as
@@ -245,7 +245,7 @@ Risks:
 
 - Join link: built from the current page address, e.g.
   `const url = new URL(location.href); url.search = '?join=' + code; url.hash = '';`.
-  Not from `import.meta.env.BASE_URL`: `vite.config.js` sets `base: './'`, so
+  Not from `import.meta.env.BASE_URL`: `vite.config.ts` sets `base: './'`, so
   in the build it is `./` and `location.origin + BASE_URL` gives
   `https://<host>./?join=...`, which drops the `/tetris-threejs/` path.
 - **Share**: `navigator.share({ url })` where supported, else copy the link with
@@ -305,7 +305,7 @@ pieces would stop matching the opponent's (5.4).
 ### 4.6 Transport interface
 
 ```js
-// src/net/transport.js
+// src/net/transport.ts
 // A transport moves JSON messages between exactly two peers.
 export class Transport {
   host(code) {}          // Promise<void>; rejects with { code: 'taken' }
@@ -348,7 +348,7 @@ rounds on its own:
   and `allOut` shows a draw. Online, a `RemoteField` turns game over as soon
   as a snapshot says `over`, so the local screen would show a result before
   the host decides it (5.5).
-- Start (or a tap, `src/main.js`) after a round calls `restartGame()` locally,
+- Start (or a tap, `src/main.ts`) after a round calls `restartGame()` locally,
   which would skip the rematch handshake (2.5).
 
 In `online` mode, `GameScreen` doesn't set `isWinner`, doesn't treat `allOut`
@@ -361,7 +361,7 @@ each round from the host's `start` message.
 These are the rules in `GameScreen` that touch an opponent, and what they
 become online:
 
-| Local event | Today (`gameScreen.js`) | Online |
+| Local event | Today (`gameScreen.ts`) | Online |
 | --- | --- | --- |
 | Clear 4 lines | `opponent.addLine()` | send `{ t: 'attack', kind: 'line' }` |
 | Use Add Line | `opponent.addLine()` | send `{ t: 'attack', kind: 'line' }` |
@@ -429,7 +429,7 @@ So there are two streams:
 | `random` | `spawnRandomPower()`, `addLine()` gap | `Math.random`, per device |
 
 - Add a small seeded PRNG (e.g. mulberry32, about 10 lines) in
-  `src/game/random.js`. The same seed only gives the same pieces if both
+  `src/game/random.ts`. The same seed only gives the same pieces if both
   devices generate pieces the same way: same PRNG, same `TETROMINO_KINDS`
   order, same `generatePiece()`. A protocol version number bumped by hand
   could miss a change to any of these, so `hello` compares a build ID instead
@@ -508,30 +508,30 @@ New files:
 
 | File | Contents |
 | --- | --- |
-| `src/net/transport.js` | `Transport` interface and `LoopbackTransport` |
-| `src/net/peerTransport.js` | PeerJS implementation |
-| `src/net/joinCode.js` | Code generation, validation, peer ID prefix |
-| `src/net/playerName.js` | Name rules, cleaning, saved name |
-| `src/game/random.js` | Seeded PRNG for the shared piece sequence |
-| `src/net/protocol.js` | Message types, build ID, field encoding |
-| `src/net/session.js` | Room state machine (below) |
-| `src/game/remoteField.js` | Read-only opponent field plus attack forwarding |
-| `src/ui/lobby.js` | Create / join / share / QR screens |
+| `src/net/transport.ts` | `Transport` interface and `LoopbackTransport` |
+| `src/net/peerTransport.ts` | PeerJS implementation |
+| `src/net/joinCode.ts` | Code generation, validation, peer ID prefix |
+| `src/net/playerName.ts` | Name rules, cleaning, saved name |
+| `src/game/random.ts` | Seeded PRNG for the shared piece sequence |
+| `src/net/protocol.ts` | Message types, build ID, field encoding |
+| `src/net/session.ts` | Room state machine (below) |
+| `src/game/remoteField.ts` | Read-only opponent field plus attack forwarding |
+| `src/ui/lobby.ts` | Create / join / share / QR screens |
 
 Changed files:
 
 | File | Change |
 | --- | --- |
-| `src/main.js` | Mode select (solo / host / guest), builds `GameScreen` with a `RemoteField` online; no Solo shortcut while the lobby is open; `?online=1` flag |
-| `src/game/input.js` | Ignore key events from text fields |
-| `src/game/gameScreen.js` | Skip remote players in `update()`; `online` mode with no local result or restart; `onAttack` / `onOver` hooks; round number; `pieceSeed` option |
-| `src/game/tetrisField.js` | `pieceRandom` option used only by `generatePiece()` |
-| `src/render/renderer.js` | Per-board layout and scale, `mini` layout without ghost / hold / next, attack flash |
-| `vite.config.js` | `define` the build ID |
+| `src/main.ts` | Mode select (solo / host / guest), builds `GameScreen` with a `RemoteField` online; no Solo shortcut while the lobby is open; `?online=1` flag |
+| `src/game/input.ts` | Ignore key events from text fields |
+| `src/game/gameScreen.ts` | Skip remote players in `update()`; `online` mode with no local result or restart; `onAttack` / `onOver` hooks; round number; `pieceSeed` option |
+| `src/game/tetrisField.ts` | `pieceRandom` option used only by `generatePiece()` |
+| `src/render/renderer.ts` | Per-board layout and scale, `mini` layout without ghost / hold / next, attack flash |
+| `vite.config.ts` | `define` the build ID |
 | `index.html`, `src/style.css` | Start screen buttons, lobby panel, status banners |
 | `README.md` | How to play online |
 
-Room state machine (`session.js`):
+Room state machine (`session.ts`):
 
 ```
 idle -> hosting -> waiting -> countdown -> playing -> roundOver -> countdown ...
