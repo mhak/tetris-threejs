@@ -22,7 +22,10 @@ const emptyRow = () => new Array(Width).fill(0);
 const silent = { play() {} };
 
 export class TetrisField {
-  constructor(playerNum = 0, { sounds = silent, random = Math.random } = {}) {
+  constructor(
+    playerNum = 0,
+    { sounds = silent, random = Math.random, powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide] } = {},
+  ) {
     this.playerNum = playerNum;
     this.sounds = sounds;
     this.random = random;
@@ -37,7 +40,8 @@ export class TetrisField {
     this.lines = 0;
     this.powerInterval = 4;
     this.powerIntervalCount = 0;
-    this.powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide];
+    // The last entry is the rare one (15%); the rest share the other 85%.
+    this.powerList = powerList;
     this.powers = [];
     this.powersMax = 5;
     this.disablePowerCollect = false;

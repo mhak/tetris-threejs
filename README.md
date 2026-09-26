@@ -1,7 +1,10 @@
 # tetris-threejs
 
 A Three.js port of [mhak/tetris](https://github.com/mhak/tetris), the two-player
-MonoGame versus Tetris. The game rules are ported one-to-one from the C# code;
+MonoGame versus Tetris. It currently runs as a **single-player** game built for
+phones as well as desktop; 2-player versus is switched off for now (set
+`PLAYER_COUNT` to 2 in `src/main.js` and uncomment the P2 controls in
+`index.html` to bring it back). The game rules are ported one-to-one from the C# code;
 rendering is now a 3D scene with textured cubes, glass-style wells and a
 slowly drifting camera.
 
@@ -35,7 +38,12 @@ clearing the row they sit in.
 
 Intentional differences:
 
-- Keyboard controls were added for both players (gamepads still work).
+- Touch controls and a phone layout: on a tall screen the score, hold and next
+  sit in a compact HUD above the well, and the buttons are at the bottom (or on
+  the right when the phone is sideways).
+- In single-player only the Clear Line and Left Slide powers spawn, since Add
+  Line and Drop hit the opponent. All four come back in 2-player mode.
+- Keyboard controls were added (gamepads still work).
 - A start screen is shown first, because browsers only allow audio after a user gesture.
   If you start with a controller, sound begins after the first key press or click.
 - Bugs from the original were fixed:
@@ -55,13 +63,30 @@ Intentional differences:
 
 ## Controls
 
-| Action | Player 1 | Player 2 | Gamepad |
-| --- | --- | --- | --- |
-| Move | A / D | Left / Right | Stick or D-pad |
-| Soft drop | S | Down | Down |
-| Hard drop | W | Up | Up |
-| Rotate left / right | Q / E | , / . | X / A |
-| Hold | R | / | RB |
-| Use power | F | L | Y |
-| Cycle powers | Z / C | K / ; | LT / RT |
-| Pause, restart after a win | Space | Enter | Start |
+### Touch
+
+| Gesture | Action |
+| --- | --- |
+| Drag left / right | Move one column per cell dragged |
+| Drag down | Soft drop |
+| Flick down | Hard drop |
+| Flick up | Hold |
+| Tap the board | Rotate right (or restart after game over) |
+
+The button bar has Hold, Rotate left, Rotate right, Use power and Pause.
+The game pauses itself when the app goes to the background.
+
+### Keyboard and gamepad
+
+| Action | Keyboard | Gamepad |
+| --- | --- | --- |
+| Move | A / D or Left / Right | Stick or D-pad |
+| Soft drop | S or Down | Down |
+| Hard drop | W or Up | Up |
+| Rotate left / right | Q / E or , / . | X / A |
+| Hold | R or / | RB |
+| Use power | F or L | Y |
+| Cycle powers | Z / C or K / ; | LT / RT |
+| Pause, restart after game over | Space or Enter | Start |
+
+In 2-player mode, player 1 uses the first keyboard set and player 2 the second.

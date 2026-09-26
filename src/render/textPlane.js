@@ -31,7 +31,15 @@ export class TextPlane {
     this.drawnColor = color;
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = `${Math.round(canvas.height * this.fontScale)}px ${FONT}`;
+    // Shrink long text to fit the plane instead of clipping it.
+    let size = Math.round(canvas.height * this.fontScale);
+    ctx.font = `${size}px ${FONT}`;
+    const maxWidth = canvas.width - 8;
+    const width = ctx.measureText(text).width;
+    if (width > maxWidth) {
+      size = Math.floor((size * maxWidth) / width);
+      ctx.font = `${size}px ${FONT}`;
+    }
     ctx.textBaseline = 'middle';
     ctx.textAlign = this.align;
     ctx.shadowColor = 'rgba(0,0,0,0.8)';

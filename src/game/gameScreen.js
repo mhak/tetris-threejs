@@ -4,6 +4,9 @@ import { Block } from './block.js';
 import { TetrisField } from './tetrisField.js';
 import { emptyState } from './input.js';
 
+// Add Line and Drop target opponents, so solo play only gets self-powers.
+const SOLO_POWERS = [Block.ClearLine, Block.LeftSlide];
+
 export class GameScreen {
   constructor({ playerCount = 2, sounds, random = Math.random } = {}) {
     this.playerCount = playerCount;
@@ -21,20 +24,22 @@ export class GameScreen {
   }
 
   createField(i) {
-    return new TetrisField(i, { sounds: this.sounds, random: this.random });
+    const options = { sounds: this.sounds, random: this.random };
+    if (this.playerCount === 1) options.powerList = SOLO_POWERS;
+    return new TetrisField(i, options);
   }
 
   get hasWinner() {
     return this.players.some((p) => p.isWinner);
   }
 
-  /** Every player topped out (e.g. both in the same frame), so nobody won. */
-  get isDraw() {
+  /** Every player topped out: game over in solo, a draw in versus. */
+  get allOut() {
     return this.players.every((p) => p.isGameOver);
   }
 
   get isFinished() {
-    return this.hasWinner || this.isDraw;
+    return this.hasWinner || this.allOut;
   }
 
   opponentsOf(playerField) {
@@ -43,7 +48,7 @@ export class GameScreen {
 
   /** @param getState (playerIndex) => virtual pad state */
   update(elapsedMs, getState) {
-    if (this.isDraw) {
+    if (this.allOut) {
       // Game-over players are skipped below, so handle restart here.
       const states = this.players.map((_, i) => getState(i));
       const restart = states.some((s, i) => s.start && !this.oldStates[i].start);
@@ -56,9 +61,10 @@ export class GameScreen {
       const playerField = this.players[i];
       if (playerField.isGameOver) continue;
 
-      playerField.isWinner = this.players
-        .filter((p) => p.playerNum !== playerField.playerNum)
-        .every((p) => p.isGameOver);
+      // Solo play has no winner; the round ends at game over instead.
+      playerField.isWinner =
+        this.players.length > 1 &&
+        this.players.filter((p) => p !== playerField).every((p) => p.isGameOver);
 
       if (!this.handlePlayerInputs(elapsedMs, playerField, getState(i), this.oldStates[i])) continue;
 

@@ -4,10 +4,31 @@ import { TextPlane } from './textPlane.js';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 const BLOCK_TYPES = 11; // block1.png .. block11.png map to field values 1..11
-const BOARD_SPAN = 18; // board (10) + gap + info panel
 const PLAYER_GAP = 3;
-const TOP = Height / 2 + 1; // world y of the board's top edge
 const CUBE = 0.92;
+const FRAME = 0.3;
+
+/*
+ * Each board is a group whose origin is the top-left corner of the well, so
+ * cell (x, y) sits at local (x + 0.5, -y - 0.5). Two layouts place the info:
+ *   landscape: score, hold and next to the right of the well (desktop, versus)
+ *   portrait:  a compact HUD above the well (phones held upright)
+ * Bounds are the local extents used to centre and fit the camera.
+ */
+const LAYOUTS = {
+  landscape: {
+    bounds: { minX: -FRAME, maxX: 18, minY: -22.1, maxY: 0.4 },
+    hold: { x: 11, y: -4.6, scale: 0.8 },
+    next: { x: 11, y: -10.6, scale: 0.8 },
+    powers: { x: 1, y: -21, step: 1, scale: 1, rest: 0.8 },
+  },
+  portrait: {
+    bounds: { minX: -FRAME, maxX: Width + FRAME, minY: -Height - FRAME, maxY: 5.6 },
+    hold: { x: 0.1, y: 3.0, scale: 0.6 },
+    next: { x: 7.1, y: 3.0, scale: 0.6 },
+    powers: { x: 3.55, y: 2.8, step: 0.62, scale: 0.6, rest: 0.5 },
+  },
+};
 
 /**
  * Three.js view of a GameScreen. Every frame the block instances are rebuilt
@@ -15,7 +36,10 @@ const CUBE = 0.92;
  */
 export class Renderer {
   constructor(container, playerCount) {
+    this.container = container;
     this.playerCount = playerCount;
+    this.layout = null;
+    this.pxPerUnit = 20;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -36,15 +60,7 @@ export class Renderer {
     for (let i = 0; i < playerCount; i++) this.boards.push(this.createBoard(i));
 
     this.resize();
-    window.addEventListener('resize', () => this.resize());
-  }
-
-  get totalWidth() {
-    return this.playerCount * BOARD_SPAN + (this.playerCount - 1) * PLAYER_GAP;
-  }
-
-  boardOriginX(i) {
-    return -this.totalWidth / 2 + i * (BOARD_SPAN + PLAYER_GAP);
+    new ResizeObserver(() => this.resize()).observe(container);
   }
 
   addLights() {
@@ -94,7 +110,6 @@ export class Renderer {
   }
 
   createBoard(i) {
-    const ox = this.boardOriginX(i);
     const group = new THREE.Group();
     this.scene.add(group);
 
@@ -103,71 +118,111 @@ export class Renderer {
       new THREE.PlaneGeometry(Width, Height),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false }),
     );
-    back.position.set(ox + Width / 2, TOP - Height / 2, -CUBE / 2 - 0.01);
+    back.position.set(Width / 2, -Height / 2, -CUBE / 2 - 0.01);
     group.add(back);
 
     // Frame around the well.
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.3, metalness: 0.6 });
-    const t = 0.3;
     const addBar = (w, h, x, y) => {
       const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, 1.1), frameMat);
       bar.position.set(x, y, 0);
       group.add(bar);
     };
-    addBar(t, Height + t * 2, ox - t / 2, TOP - Height / 2);
-    addBar(t, Height + t * 2, ox + Width + t / 2, TOP - Height / 2);
-    addBar(Width, t, ox + Width / 2, TOP - Height - t / 2);
+    addBar(FRAME, Height + FRAME * 2, -FRAME / 2, -Height / 2);
+    addBar(FRAME, Height + FRAME * 2, Width + FRAME / 2, -Height / 2);
+    addBar(Width, FRAME, Width / 2, -Height - FRAME / 2);
 
-    const infoX = ox + Width + 1;
-    const text = (y, color, opts = {}) => {
-      const plane = new TextPlane({ width: 7, height: 0.8, color, ...opts });
-      plane.mesh.position.set(infoX, TOP - y, 0.6);
+    const text = (x, y, width, height, color, opts = {}) => {
+      const plane = new TextPlane({ width, height, color, ...opts });
+      plane.mesh.position.set(x, y, 0.6);
       group.add(plane.mesh);
       return plane;
     };
 
+    // Landscape: info column right of the well.
+    const landscape = {
+      score: text(11, 0, 7, 0.8, '#ffffff'),
+      lines: text(11, -0.9, 7, 0.8, '#ffffff'),
+      level: text(11, -1.8, 7, 0.8, '#ffffff'),
+      hold: text(11, -3.4, 7, 0.8, '#ffff00'),
+      next: text(11, -9.4, 7, 0.8, '#9acd32'),
+      player: text(11, -19.2, 7, 0.8, '#aaaaaa', { fontScale: 0.45 }),
+    };
+    landscape.hold.set('HOLD');
+    landscape.next.set('NEXT');
+    landscape.player.set(`P${i + 1}`);
+
+    // Portrait: three stat columns, then hold / powers / next above the well.
+    const col = [0, 3.55, 7.1];
+    const label = (x, y, str, color = '#b8c0cc') => {
+      const t = text(x, y, 3.2, 0.5, color, { fontScale: 0.6 });
+      t.set(str);
+      return t;
+    };
+    const portrait = {
+      scoreLabel: label(col[0], 5.5, 'SCORE'),
+      linesLabel: label(col[1], 5.5, 'LINES'),
+      levelLabel: label(col[2], 5.5, 'LEVEL'),
+      score: text(col[0], 5.0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
+      lines: text(col[1], 5.0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
+      level: text(col[2], 5.0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
+      hold: label(col[0], 3.8, 'HOLD', '#ffff00'),
+      powers: label(col[1], 3.8, 'POWER', '#ff9a3c'),
+      next: label(col[2], 3.8, 'NEXT', '#9acd32'),
+    };
+
     const banner = new TextPlane({ width: Width, height: 1.6, align: 'center', fontScale: 0.55 });
-    banner.mesh.position.set(ox + Width / 2, TOP - 6, 1.2);
+    banner.mesh.position.set(Width / 2, -6, 1.2);
     const bannerBack = new THREE.Mesh(
       new THREE.PlaneGeometry(Width, 2.2),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6, depthWrite: false }),
     );
-    bannerBack.position.set(ox + Width / 2, TOP - 6.8, 1.1);
+    bannerBack.position.set(Width / 2, -6.8, 1.1);
     bannerBack.renderOrder = 9;
     group.add(bannerBack, banner.mesh);
 
-    const texts = {
-      score: text(0, '#ffffff'),
-      lines: text(0.9, '#ffffff'),
-      level: text(1.8, '#ffffff'),
-      hold: text(3.4, '#ffff00'),
-      next: text(9.4, '#9acd32'),
-      player: text(Height - 0.8, '#aaaaaa', { fontScale: 0.45 }),
-      banner,
-    };
-    texts.hold.set('HOLD');
-    texts.next.set('NEXT');
-    texts.player.set(`P${i + 1}`);
-
-    return { ox, infoX, group, texts, bannerBack };
+    return { group, landscape, portrait, banner, bannerBack };
   }
 
   refreshText() {
-    for (const b of this.boards) for (const t of Object.values(b.texts)) t.refresh();
+    for (const b of this.boards) {
+      for (const t of [...Object.values(b.landscape), ...Object.values(b.portrait), b.banner]) t.refresh();
+    }
+  }
+
+  /** Portrait HUD only for a single board on a tall screen. */
+  chooseLayout(aspect) {
+    return this.playerCount === 1 && aspect < 0.85 ? 'portrait' : 'landscape';
+  }
+
+  applyLayout(name) {
+    this.layout = name;
+    const { bounds } = LAYOUTS[name];
+    const spanW = bounds.maxX - bounds.minX;
+    const totalW = this.playerCount * spanW + (this.playerCount - 1) * PLAYER_GAP;
+    const top = -(bounds.maxY + bounds.minY) / 2; // centre vertically on y = 0
+
+    this.boards.forEach((board, i) => {
+      const ox = -totalW / 2 - bounds.minX + i * (spanW + PLAYER_GAP);
+      board.group.position.set(ox, top, 0);
+      for (const t of Object.values(board.landscape)) t.mesh.visible = name === 'landscape';
+      for (const t of Object.values(board.portrait)) t.mesh.visible = name === 'portrait';
+    });
+    return { fitW: totalW + 1, fitH: bounds.maxY - bounds.minY + 1 };
   }
 
   resize() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = Math.max(1, this.container.clientWidth);
+    const h = Math.max(1, this.container.clientHeight);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
 
-    // Fit the whole play area (all boards, info panels and power rows).
-    const fitW = this.totalWidth + 2;
-    const fitH = Height + 5;
+    // Fit the whole play area (boards, info and power rows).
+    const { fitW, fitH } = this.applyLayout(this.chooseLayout(w / h));
     const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
     this.baseDistance = Math.max(fitH / 2 / tan, fitW / 2 / (tan * this.camera.aspect));
     this.camera.updateProjectionMatrix();
+    this.pxPerUnit = h / (2 * this.baseDistance * tan);
 
     // Cover the view with the background plane (keeping its 16:9 aspect).
     const dist = this.baseDistance + Math.abs(this.background.position.z);
@@ -193,10 +248,6 @@ export class Renderer {
     this.renderer.render(this.scene, this.camera);
   }
 
-  cellPos(ox, x, y) {
-    return [ox + x + 0.5, TOP - y - 0.5];
-  }
-
   pushBlock(meshes, value, wx, wy, z = 0, scale = 1) {
     const mesh = meshes[value - 1];
     if (!mesh) return;
@@ -208,71 +259,90 @@ export class Renderer {
     mesh.setMatrixAt(mesh.count++, t.matrix);
   }
 
-  drawPiece(piece, ox, oy, { meshes = this.solid, info = false, shadowY = null, scale = 1 } = {}) {
+  /** Pushes a block at board-local cell coordinates. */
+  pushCell(board, meshes, value, x, y, z = 0) {
+    const o = board.group.position;
+    this.pushBlock(meshes, value, o.x + x + 0.5, o.y - y - 0.5, z);
+  }
+
+  /** Draws a piece in the well at row `row` (its posY, or the ghost row). */
+  drawPiece(board, piece, row, meshes = this.solid) {
     if (!piece) return;
-    const shape = piece.shape;
-    for (let y = 0; y < shape.length; y++) {
-      let yToDraw = info ? 0 : piece.posY;
-      if (shadowY != null) yToDraw = info ? 0 : shadowY;
-      yToDraw += y;
-      if (yToDraw < 0) continue;
-      for (let x = 0; x < shape[y].length; x++) {
-        const v = shape[y][x];
-        if (v === 0) continue;
-        const cx = x + (info ? 0 : piece.posX);
-        const [wx, wy] = this.cellPos(ox, cx * scale, oy + yToDraw * scale);
-        this.pushBlock(meshes, v, wx, wy, 0, scale);
-      }
+    piece.shape.forEach((cells, y) => {
+      if (row + y < 0) return;
+      cells.forEach((v, x) => {
+        if (v !== 0) this.pushCell(board, meshes, v, piece.posX + x, row + y);
+      });
+    });
+  }
+
+  /**
+   * Draws a hold / next preview at a layout slot. Empty rows and columns of
+   * the piece matrix are trimmed so every piece sits at the slot's top-left,
+   * vertically centred in a two-row box.
+   */
+  drawPreview(board, piece, slot) {
+    if (!piece) return;
+    const filled = [];
+    piece.shape.forEach((cells, y) => cells.forEach((v, x) => v !== 0 && filled.push([x, y, v])));
+    const minX = Math.min(...filled.map((c) => c[0]));
+    const minY = Math.min(...filled.map((c) => c[1]));
+    const rows = Math.max(...filled.map((c) => c[1])) - minY + 1;
+    const o = board.group.position;
+    const s = slot.scale;
+    const top = o.y + slot.y - (Math.max(0, 2 - rows) / 2) * s;
+    for (const [x, y, v] of filled) {
+      this.pushBlock(this.solid, v, o.x + slot.x + (x - minX + 0.5) * s, top - (y - minY + 0.5) * s, 0, s);
     }
   }
 
   drawPlayer(game, field, board) {
-    const { ox, infoX, texts } = board;
+    const layout = LAYOUTS[this.layout];
 
     if (field.isGameOver) {
       // Rainbow fill, like the original game-over screen.
       for (let y = 0; y < Height; y++) {
-        for (let x = 0; x < Width; x++) {
-          const [wx, wy] = this.cellPos(ox, x, y);
-          this.pushBlock(this.solid, (y % 7) + 1, wx, wy);
-        }
+        for (let x = 0; x < Width; x++) this.pushCell(board, this.solid, (y % 7) + 1, x, y);
       }
     } else {
       for (let y = 0; y < Height; y++) {
         for (let x = 0; x < Width; x++) {
           const v = field.field[y][x];
           if (v === 0) continue;
-          const [wx, wy] = this.cellPos(ox, x, y);
           // Power blocks bob gently so they stand out.
           const z = v >= 8 ? Math.sin(this.time * 4 + x + y) * 0.12 : 0;
-          this.pushBlock(this.solid, v, wx, wy, z);
+          this.pushCell(board, this.solid, v, x, y, z);
         }
       }
-      if (field.shadowY > 0) {
-        this.drawPiece(field.currentPiece, ox, 0, { meshes: this.ghost, shadowY: field.shadowY });
-      }
-      this.drawPiece(field.currentPiece, ox, 0);
+      if (field.shadowY > 0) this.drawPiece(board, field.currentPiece, field.shadowY, this.ghost);
+      this.drawPiece(board, field.currentPiece, field.currentPiece.posY);
     }
 
-    // Collected powers under the well.
+    // Collected powers; the first one is next to be used, so it's drawn bigger.
+    const o = board.group.position;
+    const p = layout.powers;
     field.powers.forEach((power, idx) => {
-      const [wx, wy] = this.cellPos(ox, idx + 1, Height + 1);
-      this.pushBlock(this.solid, power, wx, wy, 0, idx === 0 ? 1 : 0.8);
+      const scale = idx === 0 ? p.scale : p.rest;
+      this.pushBlock(this.solid, power, o.x + p.x + (idx + 0.5) * p.step, o.y + p.y - 0.5 * p.step, 0, scale);
     });
 
-    texts.score.set(`SCORE ${field.score}`);
-    texts.lines.set(`LINES ${field.lines}`);
-    texts.level.set(`LEVEL ${field.level + 1}`);
+    this.drawPreview(board, field.heldPiece, layout.hold);
+    this.drawPreview(board, field.nextPiece, layout.next);
 
-    this.drawPiece(field.heldPiece, infoX, 4.6, { info: true, scale: 0.8 });
-    this.drawPiece(field.nextPiece, infoX, 10.6, { info: true, scale: 0.8 });
+    const { landscape, portrait } = board;
+    landscape.score.set(`SCORE ${field.score}`);
+    landscape.lines.set(`LINES ${field.lines}`);
+    landscape.level.set(`LEVEL ${field.level + 1}`);
+    portrait.score.set(`${field.score}`);
+    portrait.lines.set(`${field.lines}`);
+    portrait.level.set(`${field.level + 1}`);
 
     let banner = '';
     if (game.pause) banner = 'PAUSE';
     else if (field.isWinner) banner = 'WINNER';
-    else if (game.isDraw) banner = 'DRAW';
-    texts.banner.set(banner);
-    texts.banner.mesh.visible = board.bannerBack.visible = banner !== '';
+    else if (game.allOut) banner = game.players.length > 1 ? 'DRAW' : 'GAME OVER';
+    board.banner.set(banner);
+    board.banner.mesh.visible = board.bannerBack.visible = banner !== '';
   }
 
   updateCamera(dtMs) {

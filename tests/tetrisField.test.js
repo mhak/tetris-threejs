@@ -238,7 +238,7 @@ test('only cleared rows with powers are left out of the power counter', () => {
 test('when both players top out together, start restarts the game', () => {
   const game = new GameScreen({ playerCount: 2, random: fixedRandom(0) });
   game.players.forEach((p) => (p.isGameOver = true));
-  assert.equal(game.isDraw, true);
+  assert.equal(game.allOut, true);
   assert.equal(game.isFinished, true);
   game.update(16, (j) => ({ ...emptyState(), start: j === 1 }));
   assert.ok(game.players.every((p) => !p.isGameOver));
@@ -253,4 +253,22 @@ test('powers do not touch opponents that are already out', () => {
   game.usePower(p1);
   game.usePower(p1);
   assert.equal(JSON.stringify(p2.field), before);
+});
+
+test('solo play has no winner and restarts from game over', () => {
+  const game = new GameScreen({ playerCount: 1, random: fixedRandom(0) });
+  game.update(16, () => emptyState());
+  assert.equal(game.players[0].isWinner, false);
+  assert.equal(game.isFinished, false);
+  game.players[0].isGameOver = true;
+  assert.equal(game.isFinished, true);
+  game.update(16, () => ({ ...emptyState(), start: true }));
+  assert.equal(game.players[0].isGameOver, false);
+});
+
+test('solo play only spawns powers that act on your own field', () => {
+  const game = new GameScreen({ playerCount: 1 });
+  assert.deepEqual(game.players[0].powerList, [Block.ClearLine, Block.LeftSlide]);
+  const versus = new GameScreen({ playerCount: 2 });
+  assert.equal(versus.players[0].powerList.length, 4);
 });

@@ -38,8 +38,20 @@ const STICK_THRESHOLD = 0.5;
 
 export const emptyState = () => Object.fromEntries(BUTTONS.map((b) => [b, false]));
 
+/** In solo play player 1 can use either keyboard layout. */
+function mergeLayouts(layouts) {
+  const merged = {};
+  for (const layout of layouts) {
+    for (const [button, codes] of Object.entries(layout)) {
+      merged[button] = [...(merged[button] ?? []), ...codes];
+    }
+  }
+  return merged;
+}
+
 export class Input {
-  constructor(target = window) {
+  constructor({ target = window, playerCount = 2 } = {}) {
+    this.layouts = playerCount === 1 ? [mergeLayouts(KEYBOARD_LAYOUTS)] : KEYBOARD_LAYOUTS;
     this.keys = new Set();
     // Keys pressed since the last frame, so a tap shorter than a frame still registers.
     this.tapped = new Set();
@@ -68,7 +80,7 @@ export class Input {
 
   getState(playerIndex) {
     const state = emptyState();
-    const layout = KEYBOARD_LAYOUTS[playerIndex];
+    const layout = this.layouts[playerIndex];
     if (layout) {
       for (const [button, codes] of Object.entries(layout)) {
         if (codes.some((c) => this.keys.has(c) || this.tapped.has(c))) state[button] = true;
