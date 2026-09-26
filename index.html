@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+    <title>Tetris Three.js</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="start">
+      <div class="panel">
+        <h1>TETRIS</h1>
+        <div class="blink">PRESS ANY KEY OR BUTTON</div>
+        <div class="controls">
+          <div>
+            <h2>PLAYER 1</h2>
+            <dl>
+              <dt>A / D</dt><dd>Move</dd>
+              <dt>S</dt><dd>Soft drop</dd>
+              <dt>W</dt><dd>Hard drop</dd>
+              <dt>Q / E</dt><dd>Rotate</dd>
+              <dt>R</dt><dd>Hold</dd>
+              <dt>F</dt><dd>Use power</dd>
+              <dt>Z / C</dt><dd>Cycle powers</dd>
+              <dt>Space</dt><dd>Pause / restart</dd>
+            </dl>
+          </div>
+          <div>
+            <h2>PLAYER 2</h2>
+            <dl>
+              <dt>&larr; / &rarr;</dt><dd>Move</dd>
+              <dt>&darr;</dt><dd>Soft drop</dd>
+              <dt>&uarr;</dt><dd>Hard drop</dd>
+              <dt>, / .</dt><dd>Rotate</dd>
+              <dt>/</dt><dd>Hold</dd>
+              <dt>L</dt><dd>Use power</dd>
+              <dt>K / ;</dt><dd>Cycle powers</dd>
+              <dt>Enter</dt><dd>Pause / restart</dd>
+            </dl>
+          </div>
+          <div>
+            <h2>GAMEPAD</h2>
+            <dl>
+              <dt>Stick/D-pad</dt><dd>Move, up = hard drop</dd>
+              <dt>A / X</dt><dd>Rotate R / L</dd>
+              <dt>RB</dt><dd>Hold</dd>
+              <dt>Y</dt><dd>Use power</dd>
+              <dt>LT / RT</dt><dd>Cycle powers</dd>
+              <dt>Start</dt><dd>Pause / restart</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
