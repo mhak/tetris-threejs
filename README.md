@@ -4,7 +4,7 @@ A Three.js port of [mhak/tetris](https://github.com/mhak/tetris), the two-player
 MonoGame versus Tetris. It runs as a **single-player** game built for phones as
 well as desktop, and as **online versus** between two devices with a join code
 (see [Playing online](#playing-online)). Local 2-player on one device is
-switched off for now (set `PLAYER_COUNT` to 2 in `src/main.js` and uncomment
+switched off for now (set `PLAYER_COUNT` to 2 in `src/main.ts` and uncomment
 the P2 controls in `index.html` to bring it back). The game rules are ported
 one-to-one from the C# code; rendering is now a 3D scene with textured cubes,
 glass-style wells and a slowly drifting camera.
@@ -13,10 +13,18 @@ glass-style wells and a slowly drifting camera.
 
 ```sh
 npm install
-npm run dev      # dev server
-npm run build    # static build in dist/
-npm test         # game-logic and online tests (node:test)
+npm run dev        # dev server
+npm run build      # type check, then static build in dist/
+npm run typecheck  # type check only (tsc, strict)
+npm test           # game-logic and online tests (node:test)
 ```
+
+The code is TypeScript. Vite compiles it for the browser, and the tests run
+the `.ts` files directly with Node's built-in type stripping (Node 22.18 or
+newer), so there is no separate compile step. Because of that the code sticks
+to syntax Node can strip (no `enum`, `namespace` or constructor parameter
+properties; `erasableSyntaxOnly` in `tsconfig.json` enforces this), and
+imports use `.ts` extensions.
 
 ## Playing online
 
@@ -80,18 +88,18 @@ people who have the link.
 
 | Original (C#) | Port |
 | --- | --- |
-| `Models/TetrisField.cs` | `src/game/tetrisField.js` |
-| `Models/Tetrinoms/*.cs` | `src/game/tetromino.js` |
-| `GameLogic/WallKick.cs` | `src/game/wallKick.js` |
-| `Models/Block.cs` | `src/game/block.js` |
-| `Screens/GameScreen.cs` (rules, input, powers) | `src/game/gameScreen.js` |
-| `Screens/GameScreen.cs` (drawing) | `src/render/renderer.js` |
-| MonoGame `GamePad` | `src/game/input.js` (Gamepad API + keyboard) |
-| `SoundEffect` / `MediaPlayer` | `src/audio.js` (Web Audio + `<audio>`) |
+| `Models/TetrisField.cs` | `src/game/tetrisField.ts` |
+| `Models/Tetrinoms/*.cs` | `src/game/tetromino.ts` |
+| `GameLogic/WallKick.cs` | `src/game/wallKick.ts` |
+| `Models/Block.cs` | `src/game/block.ts` |
+| `Screens/GameScreen.cs` (rules, input, powers) | `src/game/gameScreen.ts` |
+| `Screens/GameScreen.cs` (drawing) | `src/render/renderer.ts` |
+| MonoGame `GamePad` | `src/game/input.ts` (Gamepad API + keyboard) |
+| `SoundEffect` / `MediaPlayer` | `src/audio.ts` (Web Audio + `<audio>`) |
 | `Content/` | `public/assets/` |
 
 Online play is new: `src/net/` (transport, PeerJS, join codes, names,
-protocol, room session), `src/game/remoteField.js`, `src/game/random.js` and
+protocol, room session), `src/game/remoteField.ts`, `src/game/random.ts` and
 `src/ui/` (lobby and in-match status).
 
 Gameplay is the same: 2 players, hold, next, ghost piece, SRS-style wall kicks,
