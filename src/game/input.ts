@@ -1,6 +1,6 @@
 // Virtual gamepad per player, built from the Gamepad API plus a keyboard layout
 // so the game is playable without controllers. Button names follow the Xbox
-// layout used by the original MonoGame GameScreen.
+// controller layout.
 export const BUTTONS = ['left', 'right', 'down', 'up', 'a', 'x', 'y', 'rb', 'lt', 'rt', 'start'] as const;
 
 export type Button = (typeof BUTTONS)[number];

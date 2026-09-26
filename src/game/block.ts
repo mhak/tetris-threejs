@@ -1,4 +1,3 @@
-// Port of Tetris/Models/Block.cs
 export const Block = Object.freeze({
   None: 0,
   J: 1,

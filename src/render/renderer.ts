@@ -212,7 +212,7 @@ export class Renderer {
   addBackground() {
     const tex = this.loader.load(BASE + 'background/mountain-1920x1080.jpg');
     tex.colorSpace = THREE.SRGBColorSpace;
-    // The original drew the background at 50% alpha over black.
+    // Background dimmed to 50% over black.
     const material = new THREE.MeshBasicMaterial({ map: tex, color: 0x808080, depthWrite: false });
     this.background = new THREE.Mesh(new THREE.PlaneGeometry(16, 9), material);
     this.background.position.z = -30;
@@ -545,7 +545,7 @@ export class Renderer {
     const layout = LAYOUTS[board.layout];
 
     if (field.isGameOver) {
-      // Rainbow fill, like the original game-over screen.
+      // Rainbow fill on game over.
       for (let y = 0; y < Height; y++) {
         for (let x = 0; x < Width; x++) this.pushCell(board, this.solid, (y % 7) + 1, x, y);
       }

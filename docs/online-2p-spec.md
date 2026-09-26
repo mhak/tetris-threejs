@@ -32,7 +32,7 @@ prototype before we commit to them.
 - Matchmaking with strangers, lobbies, friend lists or chat.
 - More than 2 players, or spectators.
 - Cheat prevention. Both clients are trusted.
-- Changing the game rules. The rules stay as ported from the C# game; the
+- Changing the game rules. The rules stay as they are; the
   shared piece sequence (5.4) changes only where pieces come from, not the rules.
 - Local 2-player on one device (`PLAYER_COUNT = 2`). It stays as it is today.
 

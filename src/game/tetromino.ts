@@ -1,4 +1,3 @@
-// Port of Tetris/Models/Tetrinoms/*.cs
 export type PieceKind = 'I' | 'O' | 'T' | 'J' | 'L' | 'S' | 'Z';
 
 export class Tetromino {
