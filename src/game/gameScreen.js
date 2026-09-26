@@ -3,6 +3,7 @@
 import { Block } from './block.js';
 import { TetrisField } from './tetrisField.js';
 import { RemoteField } from './remoteField.js';
+import { mulberry32 } from './random.js';
 import { emptyState } from './input.js';
 
 // Add Line and Drop target opponents, so solo play only gets self-powers.
@@ -10,15 +11,24 @@ const SOLO_POWERS = [Block.ClearLine, Block.LeftSlide];
 
 export class GameScreen {
   /**
+   * @param pieceSeed gives every local field the same piece sequence
    * @param online versus against another device: player 0 is the local board
-   *   and player 1 a RemoteField that mirrors the opponent's snapshots
+   *   and player 1 a RemoteField that mirrors the opponent's snapshots. The
+   *   session (src/net/session.js) starts rounds and decides results.
    */
-  constructor({ playerCount = 2, sounds, random = Math.random, online = false } = {}) {
+  constructor({ playerCount = 2, sounds, random = Math.random, pieceSeed = null, online = false } = {}) {
     this.online = online;
     this.playerCount = online ? 2 : playerCount;
     this.sounds = sounds;
     this.random = random;
+    this.pieceSeed = pieceSeed;
+    // Online only, set through startRound() and the session.
     this.round = 0;
+    this.countdown = 0; // ms before input and gravity (re)start
+    this.result = null; // null while undecided, then 0 (we won), 1 (they won) or 'draw'
+    this.names = null; // [local, remote] display names
+    this.overSent = false;
+    this.pendingAttacks = [];
     this.players = [];
     this.oldStates = [];
     this.keysAccumulation = [];
@@ -35,6 +45,8 @@ export class GameScreen {
       return new RemoteField(i, { round: this.round, onAttack: (kind) => this.onAttack?.(kind) });
     }
     const options = { sounds: this.sounds, random: this.random };
+    // A fresh PRNG per field, so one player's pieces never use up another's numbers.
+    if (this.pieceSeed !== null) options.pieceRandom = mulberry32(this.pieceSeed);
     if (this.playerCount === 1) options.powerList = SOLO_POWERS;
     return new TetrisField(i, options);
   }
@@ -49,7 +61,13 @@ export class GameScreen {
   }
 
   get isFinished() {
+    if (this.online) return this.result !== null;
     return this.hasWinner || this.allOut;
+  }
+
+  /** Online: input and gravity are live (started, not paused, counted down, undecided). */
+  get running() {
+    return this.round > 0 && !this.pause && this.countdown <= 0 && this.result === null;
   }
 
   opponentsOf(playerField) {
@@ -58,6 +76,10 @@ export class GameScreen {
 
   /** @param getState (playerIndex) => virtual pad state */
   update(elapsedMs, getState) {
+    if (this.online) {
+      this.updateOnline(elapsedMs, getState);
+      return;
+    }
     if (this.allOut) {
       // Game-over players are skipped below, so handle restart here.
       const states = this.players.map((_, i) => getState(i));
@@ -88,6 +110,68 @@ export class GameScreen {
     }
   }
 
+  /**
+   * Online there is one local board. It never wins, loses or restarts here:
+   * the host decides results, and Start goes to the session (pause, resume,
+   * ready for a rematch) through onStartPressed.
+   */
+  updateOnline(elapsedMs, getState) {
+    const local = this.players[0];
+    const next = getState(0);
+    const old = this.oldStates[0];
+    if (!this.pause && this.countdown > 0) this.countdown = Math.max(0, this.countdown - elapsedMs);
+    if (this.running) this.flushAttacks();
+
+    if (!this.running || local.isGameOver) {
+      this.oldStates[0] = next;
+      if (next.start && !old.start) this.onStartPressed?.();
+    } else if (this.handlePlayerInputs(elapsedMs, local, next, old)) {
+      const lines = local.update(elapsedMs);
+      if (lines === 4) {
+        for (const player of this.opponentsOf(local)) player.addLine();
+        this.onTetris?.(local);
+      }
+    }
+    this.checkOver();
+  }
+
+  /** Online: tell the session once when our board tops out. */
+  checkOver() {
+    if (!this.online || this.overSent || this.result !== null || this.round === 0) return;
+    if (!this.players[0].isGameOver) return;
+    this.overSent = true;
+    this.onOver?.();
+  }
+
+  /** Online: an attack from the opponent ('line' or 'drop'). Held while paused. */
+  receiveAttack(kind) {
+    if (this.round === 0 || this.result !== null || this.players[0].isGameOver) return;
+    if (this.running) this.applyAttack(kind);
+    else this.pendingAttacks.push(kind);
+  }
+
+  flushAttacks() {
+    const queued = this.pendingAttacks;
+    this.pendingAttacks = [];
+    for (const kind of queued) this.applyAttack(kind);
+  }
+
+  applyAttack(kind) {
+    const local = this.players[0];
+    if (local.isGameOver) return;
+    if (kind === 'line') {
+      local.addLine();
+    } else if (kind === 'drop') {
+      local.movePieceHardDrop();
+      this.sounds?.play('boom', 0.5);
+      this.onBoom?.(local);
+    } else {
+      return;
+    }
+    this.onHit?.(kind);
+    this.checkOver();
+  }
+
   handlePlayerInputs(elapsedMs, playerField, next, old) {
     const n = playerField.playerNum;
     const pressed = (b) => next[b] && !old[b];
@@ -97,7 +181,9 @@ export class GameScreen {
     };
 
     if (pressed('start')) {
-      if (playerField.isWinner) {
+      if (this.online) {
+        this.onStartPressed?.();
+      } else if (playerField.isWinner) {
         this.restartGame();
       } else {
         this.pause = !this.pause;
@@ -172,7 +258,8 @@ export class GameScreen {
     if (power === Block.Drop) {
       for (const player of this.opponentsOf(playerField)) player.movePieceHardDrop();
       this.sounds?.play('boom', 0.5);
-      this.onBoom?.(playerField);
+      // Online the shake is for the player who gets hit (applyAttack).
+      if (!this.online) this.onBoom?.(playerField);
       return;
     }
 
@@ -181,9 +268,14 @@ export class GameScreen {
     }
   }
 
-  /** Online: a fresh board for the given round. */
-  startRound(round) {
+  /** Online: fresh boards for a round, with its piece seed and a countdown. */
+  startRound(round, seed = null, countdownMs = 0) {
     this.round = round;
+    this.pieceSeed = seed;
+    this.countdown = countdownMs;
+    this.result = null;
+    this.overSent = false;
+    this.pendingAttacks = [];
     this.pause = false;
     this.restartGame();
   }

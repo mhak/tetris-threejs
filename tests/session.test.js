@@ -28,8 +28,8 @@ test('a guest joins with the code and both learn the other name', async () => {
   const g = guest();
   await g.open();
   await flush();
-  assert.equal(host.state, 'playing');
-  assert.equal(g.state, 'playing');
+  assert.equal(host.state, 'countdown');
+  assert.equal(g.state, 'countdown');
   assert.equal(host.remoteName, 'SAM');
   assert.equal(g.remoteName, 'ALEX');
   assert.equal(g.token, host.token);
@@ -55,7 +55,7 @@ test('a second guest is turned away with full', async () => {
   await flush();
   assert.equal(g2.state, 'closed');
   assert.equal(g2.closeReason, 'full');
-  assert.equal(g1.state, 'playing');
+  assert.equal(g1.state, 'countdown');
   assert.equal(host.remoteName, 'SAM');
 });
 

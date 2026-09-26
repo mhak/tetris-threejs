@@ -22,13 +22,24 @@ const emptyRow = () => new Array(Width).fill(0);
 const silent = { play() {} };
 
 export class TetrisField {
+  /**
+   * @param random power spawns and garbage gaps
+   * @param pieceRandom the piece sequence only, so garbage and powers can't
+   *   shift it (online both players get the same pieces from a shared seed)
+   */
   constructor(
     playerNum = 0,
-    { sounds = silent, random = Math.random, powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide] } = {},
+    {
+      sounds = silent,
+      random = Math.random,
+      pieceRandom = random,
+      powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide],
+    } = {},
   ) {
     this.playerNum = playerNum;
     this.sounds = sounds;
     this.random = random;
+    this.pieceRandom = pieceRandom;
 
     this.field = Array.from({ length: Height }, emptyRow);
     this.speed = 1000;
@@ -83,7 +94,7 @@ export class TetrisField {
   }
 
   generatePiece() {
-    const kind = TETROMINO_KINDS[this.randomInt(TETROMINO_KINDS.length)];
+    const kind = TETROMINO_KINDS[Math.floor(this.pieceRandom() * TETROMINO_KINDS.length)];
     return this.resetPosition(createTetromino(kind));
   }
 

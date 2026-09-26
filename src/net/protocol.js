@@ -10,7 +10,13 @@ export const MSG = Object.freeze({
   hello: 'hello', // { v, name, token? } first message both ways; must keep this shape forever
   full: 'full', // host to guest: room already has a guest
   version: 'version', // { v } build IDs differ; must keep this shape forever
+  start: 'start', // host to guest { round, seed, countdownMs }: start a round with this piece seed
   state: 'state', // board snapshot, see snapshotOf()
+  attack: 'attack', // { round, kind: 'line' | 'drop' }
+  over: 'over', // { round } the sender topped out
+  result: 'result', // host to guest { round, winner: 'host' | 'guest' | 'draw' }
+  pause: 'pause', // pause both
+  resume: 'resume', // resume both, after a countdown
 });
 
 /** True for something that looks like a protocol message. */

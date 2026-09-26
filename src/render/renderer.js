@@ -198,7 +198,7 @@ export class Renderer {
     bannerBack.renderOrder = 9;
     group.add(bannerBack, banner.mesh);
 
-    return { group, landscape, portrait, banner, bannerBack };
+    return { index: i, group, landscape, portrait, banner, bannerBack };
   }
 
   refreshText() {
@@ -357,12 +357,24 @@ export class Renderer {
     portrait.lines.set(`${field.lines}`);
     portrait.level.set(`${field.level + 1}`);
 
-    let banner = '';
-    if (game.pause) banner = 'PAUSE';
-    else if (field.isWinner) banner = 'WINNER';
-    else if (game.allOut) banner = game.players.length > 1 ? 'DRAW' : 'GAME OVER';
+    const banner = this.bannerText(game, field, board.index);
     board.banner.set(banner);
     board.banner.mesh.visible = board.bannerBack.visible = banner !== '';
+  }
+
+  bannerText(game, field, i) {
+    if (game.online) {
+      // The host's result, else pause, else the 3-2-1 countdown on our own board.
+      if (game.result === 'draw') return 'DRAW';
+      if (game.result !== null) return game.result === i ? `${game.names?.[i] ?? ''} WINS`.trim() : '';
+      if (game.pause) return 'PAUSE';
+      if (game.countdown > 0 && i === 0) return String(Math.ceil(game.countdown / 1000));
+      return '';
+    }
+    if (game.pause) return 'PAUSE';
+    if (field.isWinner) return 'WINNER';
+    if (game.allOut) return game.players.length > 1 ? 'DRAW' : 'GAME OVER';
+    return '';
   }
 
   updateCamera(dtMs) {
