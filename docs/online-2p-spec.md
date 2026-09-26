@@ -1,6 +1,6 @@
 # Spec: online 2-player versus with a join code
 
-Status: draft
+Status: draft, decisions from review added (section 10)
 Scope: play the existing versus rules on two different devices (phone, tablet
 or desktop, in any mix). One player creates a room and gets a short join code;
 the other enters the code, opens a share link or scans a QR code.
@@ -21,13 +21,17 @@ prototype before we commit to them.
   within a grace period.
 - Each device shows its own well full size and the opponent's well as a small
   live view, so it fits a phone.
+- Both players get the same piece sequence each round, so neither gets luckier
+  pieces.
+- Players pick a name, shown on the opponent's screen and the result screen.
 
 ### Non-goals (for this version)
 
 - Matchmaking with strangers, lobbies, friend lists or chat.
 - More than 2 players, or spectators.
 - Cheat prevention. Both clients are trusted.
-- Changing the game rules. The rules stay as ported from the C# game.
+- Changing the game rules. The rules stay as ported from the C# game; the
+  shared piece sequence (5.4) changes only where pieces come from, not the rules.
 - Local 2-player on one device (`PLAYER_COUNT = 2`). It stays as it is today.
 
 ## 2. User flows
@@ -45,6 +49,22 @@ The start overlay (`#start` in `index.html`) gets three choices:
 "Press any key / tap to start" keeps starting Solo, so the current one-tap flow
 is not slower. The two online buttons sit below it.
 
+### 2.1a Player name
+
+- Create and Join both show a **Name** field above the rest of the screen,
+  filled in with the last name used (`localStorage`, wrapped in try/catch), or
+  empty the first time.
+- 1 to 10 characters, forced to upper case, limited to `A-Z 0-9` and space
+  (the Press Start 2P font and the 3D text both handle these). Leading and
+  trailing spaces are trimmed.
+- Empty means `PLAYER`. If both players have the same name, the opponent's is
+  shown with a `2` after it on each screen, so the result screen isn't
+  confusing.
+- A name is sent once in `hello` and can't be changed while in a room.
+- A received name is re-checked against the same rules (the other client is
+  trusted for gameplay, but text still gets cleaned). It is only drawn with
+  `TextPlane` or set with `textContent`, never as HTML.
+
 ### 2.2 Create room (host)
 
 1. The host taps **Create room**.
@@ -54,7 +74,7 @@ is not slower. The two online buttons sit below it.
    - a **Share** button (Web Share API, falls back to copying the link)
    - a QR code of the join link
    - "Waiting for opponent..." and a **Cancel** button
-3. When a guest connects, both screens show "Opponent joined" and a 3-2-1
+3. When a guest connects, both screens show "<NAME> joined" and a 3-2-1
    countdown, then the round starts.
 
 ### 2.3 Join room (guest)
@@ -89,14 +109,15 @@ After joining, the `?join=` parameter is removed from the address bar with
 
 ### 2.5 End of round and rematch
 
-- When one player tops out, the other wins. Both screens show the result
-  (WINNER / LOSER, or DRAW, see 5.5).
+- When one player tops out, the other wins. Both screens show the result with
+  names, e.g. `ALEX WINS` over the winner's well, or `DRAW` (see 5.5).
 - Each player presses Start (or taps) to say "ready for a rematch". The screen
   shows "Waiting for opponent..." until both are ready, then a countdown and a
   new round in the same room.
-- A win counter (e.g. `2 - 1`) is shown for the life of the room.
+- A win counter with names (e.g. `ALEX 2 - 1 SAM`) is shown for the life of
+  the room.
 - **Leave** returns to the start screen and tells the opponent, who sees
-  "Opponent left" and a button back to the start screen.
+  "<NAME> left" and a button back to the start screen.
 
 ### 2.6 Disconnect and reconnect
 
@@ -113,7 +134,8 @@ After joining, the `?join=` parameter is removed from the address bar with
 
 Each device renders two boards: the local one at full size and the opponent's
 as a mini board. The mini board shows the well, the falling piece and the
-opponent's power slots. It does not need hold, next or the ghost piece.
+opponent's power slots, with the opponent's name above it. It does not need
+hold, next or the ghost piece. The local board is not labelled.
 
 - **Landscape** (desktop, phone sideways): local board in the current
   landscape layout; the mini board at about 45% scale to the right of the
@@ -149,9 +171,9 @@ e.g. `new Renderer(app, [{ layout: 'auto' }, { layout: 'mini' }])`, plus a
 
 Risks:
 - The public PeerJS broker is a free community service with no uptime promise.
-  **(low confidence)** on its current limits and reliability; check before
-  release. Fallback: run our own `peerjs-server` later. The transport interface
-  (4.6) keeps this swappable.
+  Decision: acceptable for launch. **(low confidence)** on its current limits;
+  worth a quick check during milestone 1. If it becomes a problem, we can run
+  our own `peerjs-server`. The transport interface (4.6) keeps this swappable.
 - WebRTC without a TURN relay fails on some networks (symmetric NAT, some
   mobile carriers, strict corporate Wi-Fi). **(low confidence)** on how often
   this happens for our players; I have seen estimates from roughly 10% to 20%
@@ -182,11 +204,9 @@ Risks:
 ### 4.4 ICE servers
 
 - STUN: Google's public STUN servers (the PeerJS default).
-- TURN: none in the first version, so no credentials to manage. If the
-  connection fails, show "Couldn't connect. Try both devices on the same Wi-Fi."
-- Follow-up if failures are common: add a TURN service (e.g. Cloudflare Calls
-  TURN or Metered). These need short-lived credentials, which means a tiny
-  serverless function, so it is out of scope for now.
+- TURN: none. Decision: no relay server, so nothing to host and no
+  credentials to manage. If the connection fails, show "Couldn't connect. Try
+  both devices on the same Wi-Fi."
 
 ### 4.5 Reconnect details
 
@@ -293,12 +313,37 @@ A snapshot has what the mini board and score need:
 
 ### 5.4 Round start and randomness
 
-- The host starts every round: `{ t: 'start', round, countdownMs: 3000 }`.
-- Each device keeps using `Math.random` for its own pieces. Players don't get
-  the same piece sequence (the original game didn't have that either).
-  Optional later: the host sends a seed and both use a seeded PRNG so both
-  players get the same pieces. `GameScreen` and `TetrisField` already accept a
-  `random` option, so this is cheap to add.
+- The host starts every round: `{ t: 'start', round, seed, countdownMs: 3000 }`.
+  `seed` is a new random 32-bit integer from `crypto.getRandomValues` each
+  round, so a rematch gets a new sequence.
+- Both players get the same piece sequence: the Nth piece is the same kind on
+  both devices, however the round plays out.
+
+How, given the current code: `TetrisField` has one `random` that is used for
+three things: `generatePiece()`, `spawnRandomPower()` and the gap column in
+`addLine()`. With one shared stream, a garbage line or a power spawn on one
+side would shift that side's later pieces, and the sequences would drift apart.
+So there are two streams:
+
+| Stream | Used by | Source |
+| --- | --- | --- |
+| `pieceRandom` | `generatePiece()` only | Seeded PRNG from the round's `seed` |
+| `random` | `spawnRandomPower()`, `addLine()` gap | `Math.random`, per device |
+
+- Add a small seeded PRNG (e.g. mulberry32, about 10 lines) in
+  `src/game/random.js`. Both devices run the same JS build (the protocol
+  version check makes sure of it), so the same seed gives the same numbers.
+- `TetrisField` takes a new `pieceRandom` option that defaults to `random`, so
+  solo and local 2-player behave exactly as today.
+- `GameScreen` takes a `pieceSeed` option and gives each local field its own
+  PRNG made from that seed. It must be a fresh PRNG per field, not a shared
+  one, or one player's pieces would consume the other's numbers (this matters
+  for local 2-player if we ever turn seeding on there).
+- Hold doesn't break this: it only takes the next piece from the same sequence
+  (`activatePiece()` when the hold slot is empty), so it never skips or reorders
+  pieces.
+- Not seeded on purpose: garbage gaps and where powers spawn stay per device.
+  Only the piece order has to match to be fair.
 
 ### 5.5 Top out and the result
 
@@ -316,6 +361,8 @@ A snapshot has what the mini board and score need:
 ### 5.6 Pause
 
 - `{ t: 'pause' }` and `{ t: 'resume' }`. Either side can send either one.
+- No limit on how many times or how long a player can pause. Decision: the
+  game is played between friends, so stalling isn't a concern.
 - On `resume`, both run a 3 s countdown before input and gravity restart.
 - `GameScreen.pause` is set from the network as well as from the Start button.
 
@@ -326,10 +373,10 @@ ordered data channel.
 
 | Type | Direction | Fields | Meaning |
 | --- | --- | --- | --- |
-| `hello` | both | `v`, `resume?` | First message. `v` is the protocol version. |
+| `hello` | both | `v`, `name`, `resume?` | First message. `v` is the protocol version, `name` the player name (2.1a). |
 | `full` | host to guest | | Room already has a guest. |
 | `version` | both | `v` | Versions don't match; show the reload message. |
-| `start` | host to guest | `round`, `countdownMs` | Start a round. |
+| `start` | host to guest | `round`, `seed`, `countdownMs` | Start a round with this piece seed (5.4). |
 | `state` | both | see 5.3 | Board snapshot. |
 | `attack` | both | `round`, `kind` | `line`, `addLine` or `drop`. |
 | `over` | both | `round` | Sender topped out. |
@@ -351,6 +398,8 @@ New files:
 | `src/net/transport.js` | `Transport` interface and `LoopbackTransport` |
 | `src/net/peerTransport.js` | PeerJS implementation |
 | `src/net/joinCode.js` | Code generation, validation, peer ID prefix |
+| `src/net/playerName.js` | Name rules, cleaning, saved name |
+| `src/game/random.js` | Seeded PRNG for the shared piece sequence |
 | `src/net/protocol.js` | Message types, `PROTOCOL_VERSION`, field encoding |
 | `src/net/session.js` | Room state machine (below) |
 | `src/game/remoteField.js` | Read-only opponent field plus attack forwarding |
@@ -361,7 +410,8 @@ Changed files:
 | File | Change |
 | --- | --- |
 | `src/main.js` | Mode select (solo / host / guest), builds `GameScreen` with a `RemoteField` online |
-| `src/game/gameScreen.js` | Skip remote players in `update()`; `onAttack` / `onOver` hooks; round number |
+| `src/game/gameScreen.js` | Skip remote players in `update()`; `onAttack` / `onOver` hooks; round number; `pieceSeed` option |
+| `src/game/tetrisField.js` | `pieceRandom` option used only by `generatePiece()` |
 | `src/render/renderer.js` | Per-board layout and scale, `mini` layout, attack flash |
 | `index.html`, `src/style.css` | Start screen buttons, lobby panel, status banners |
 | `README.md` | How to play online |
@@ -381,6 +431,12 @@ any -> closed (bye, cancel, fatal error)
 Automated (`npm test`, `node:test`, no browser):
 - `joinCode`: alphabet, length, validation, normalizing typed input.
 - `protocol`: field encode / decode round trip.
+- `playerName`: length, allowed characters, trimming, empty becomes `PLAYER`,
+  cleaning of a received name.
+- Seeded pieces: two fields with the same seed produce the same first 100
+  pieces even when one gets garbage lines, power spawns and holds and the
+  other doesn't; a different seed gives a different sequence; without a seed,
+  `TetrisField` still uses `random` for pieces (existing tests keep passing).
 - `RemoteField`: applies snapshots, drops stale `seq`, forwards attacks.
 - `GameScreen` with two `LoopbackTransport` ends: a Tetris on one side adds a
   garbage line on the other; Add Line and Drop powers; top-out gives the same
@@ -398,24 +454,27 @@ Manual matrix before release:
 ## 9. Milestones
 
 1. **Transport and codes**: `Transport`, `LoopbackTransport`, `PeerTransport`,
-   join codes, and a bare create / join screen that shows "connected".
+   join codes, names, and a bare create / join screen that shows "connected".
 2. **Mirror**: snapshots and `RemoteField`; opponent board drawn (full size is
    fine at this step).
-3. **Versus rules**: attacks, top-out and result, pause, countdown.
+3. **Versus rules**: attacks, top-out and result, pause, countdown, seeded
+   piece sequence.
 4. **Layout**: mini board in landscape and portrait, attack feedback.
 5. **Room features**: rematch and score counter, share link, QR, reconnect.
 6. **Polish**: error messages, README, manual test matrix.
 
 Each milestone is a separate PR that keeps solo play working.
 
-## 10. Open questions
+## 10. Decisions
 
-1. Same piece sequence for both players (seeded PRNG)? Fairer, but a change
-   from the original game. Default in this spec: no.
-2. Should pause be limited (e.g. 3 per player per round) so it can't be used to
-   stall? Default: unlimited.
-3. Is the public PeerJS broker acceptable for launch, or do we want our own
-   `peerjs-server` from day one?
-4. Should a failed connection offer a TURN relay (needs a small serverless
-   function for credentials), or is "use the same Wi-Fi" enough for now?
-5. Player names on the result screen, or just "YOU" / "OPPONENT"?
+Answers to the open questions from the first draft:
+
+| Question | Decision | Where |
+| --- | --- | --- |
+| Same piece sequence for both players? | Yes, seeded per round | 5.4 |
+| Limit pauses? | No, unlimited | 5.6 |
+| Public PeerJS broker for launch? | Yes | 4.1 |
+| TURN relay for failed connections? | No | 4.4 |
+| Player names? | Yes | 2.1a, 3 |
+
+No open questions left. New ones found while building go here.
