@@ -22,15 +22,29 @@ const emptyRow = () => new Array(Width).fill(0);
 const silent = { play() {} };
 
 export class TetrisField {
+  /**
+   * @param random power spawns and garbage gaps
+   * @param pieceRandom the piece sequence only, so garbage and powers can't
+   *   shift it (online both players get the same pieces from a shared seed)
+   */
   constructor(
     playerNum = 0,
-    { sounds = silent, random = Math.random, powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide] } = {},
+    {
+      sounds = silent,
+      random = Math.random,
+      pieceRandom = random,
+      powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide],
+    } = {},
   ) {
     this.playerNum = playerNum;
     this.sounds = sounds;
     this.random = random;
+    this.pieceRandom = pieceRandom;
 
     this.field = Array.from({ length: Height }, emptyRow);
+    // Goes up whenever a cell changes, so online play can tell cheaply when
+    // the board needs sending again.
+    this.revision = 0;
     this.speed = 1000;
     this.current = 0;
     this.isGameOver = false;
@@ -83,7 +97,7 @@ export class TetrisField {
   }
 
   generatePiece() {
-    const kind = TETROMINO_KINDS[this.randomInt(TETROMINO_KINDS.length)];
+    const kind = TETROMINO_KINDS[Math.floor(this.pieceRandom() * TETROMINO_KINDS.length)];
     return this.resetPosition(createTetromino(kind));
   }
 
@@ -236,6 +250,7 @@ export class TetrisField {
   }
 
   addPieceToField() {
+    this.revision++;
     const piece = this.currentPiece;
     for (let y = 0; y < piece.shape.length; y++) {
       for (let x = 0; x < piece.shape[y].length; x++) {
@@ -298,6 +313,7 @@ export class TetrisField {
     }
     if (lines === 0) return 0;
 
+    this.revision++;
     for (let i = 0; i < lines; i++) {
       this.field.unshift(emptyRow());
     }
@@ -349,9 +365,11 @@ export class TetrisField {
     if (candidates.length === 0) return;
     const [rx, ry] = candidates[this.randomInt(candidates.length)];
     this.field[ry][rx] = power;
+    this.revision++;
   }
 
   addLine() {
+    this.revision++;
     const emptyIndex = this.randomInt(10);
     const line = [];
     for (let i = 0; i < Width; i++) {
@@ -363,6 +381,7 @@ export class TetrisField {
   }
 
   clearLine() {
+    this.revision++;
     this.field.splice(Height - 1, 1);
     this.field.unshift(emptyRow());
     this.settlePiece();
@@ -370,6 +389,7 @@ export class TetrisField {
 
 
   leftSlide() {
+    this.revision++;
     this.disablePowerCollect = true;
     for (let y = 0; y < Height; y++) {
       let count = 0;

@@ -17,7 +17,23 @@
   </head>
   <body>
     <div id="stage">
-      <div id="app"></div>
+      <div id="view">
+        <div id="match-bar" hidden><span id="match-score"></span><span id="match-ping" aria-label="Latency"></span></div>
+        <div id="app"></div>
+        <div class="hud" id="hud" hidden>
+          <div class="hud-toast" id="hud-toast" hidden></div>
+          <div class="hud-panel" id="hud-panel" hidden>
+            <div class="hud-title" id="hud-title"></div>
+            <div class="hud-text" id="hud-text" aria-live="polite"></div>
+            <div class="hud-actions">
+              <button type="button" id="hud-rematch">REMATCH</button>
+              <button type="button" id="hud-resume">RESUME</button>
+              <button type="button" id="hud-leave">LEAVE</button>
+              <button type="button" id="hud-back">BACK TO START</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div id="touch-bar" class="touch-only" aria-label="Touch controls">
         <button data-action="rb" aria-label="Hold"><span class="icon">&#x21C4;</span><span>HOLD</span></button>
         <button data-action="x" aria-label="Rotate left"><span class="icon">&#x21BA;</span><span>ROT L</span></button>
@@ -27,10 +43,14 @@
       </div>
     </div>
     <div id="start">
-      <div class="panel">
+      <div class="panel" id="menu">
         <h1>TETRIS</h1>
         <div class="blink desktop-only">PRESS ANY KEY OR BUTTON</div>
         <div class="blink touch-only">TAP TO START</div>
+        <div class="online-buttons" id="online-buttons">
+          <button type="button" id="create-room">CREATE ROOM</button>
+          <button type="button" id="join-room">JOIN ROOM</button>
+        </div>
         <div class="controls touch-only">
           <div>
             <h2>TOUCH</h2>
@@ -85,6 +105,42 @@
           </div>
         </div>
       </div>
+      <div class="panel lobby" id="rejoin" hidden>
+        <h1>TETRIS</h1>
+        <div class="lobby-status" id="rejoin-text"></div>
+        <div class="lobby-actions">
+          <button type="button" class="big" id="rejoin-go">TAP TO REJOIN</button>
+        </div>
+        <div class="lobby-actions">
+          <button type="button" id="rejoin-leave">LEAVE ROOM</button>
+        </div>
+      </div>
+      <form class="panel lobby" id="lobby" hidden autocomplete="off">
+        <h1 id="lobby-title">JOIN ROOM</h1>
+        <label class="field">
+          <span>NAME</span>
+          <input id="lobby-name" placeholder="PLAYER" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="done" />
+        </label>
+        <div id="lobby-host" hidden>
+          <div class="room-code" id="room-code" aria-label="Join code"></div>
+          <div class="lobby-actions">
+            <button type="button" id="lobby-share" hidden>SHARE LINK</button>
+          </div>
+          <div class="share-note" id="share-note" aria-live="polite"></div>
+          <canvas class="qr" id="lobby-qr" hidden aria-label="QR code of the join link"></canvas>
+        </div>
+        <div id="lobby-join" hidden>
+          <label class="field">
+            <span>CODE</span>
+            <input id="lobby-code" class="code-input" placeholder="-----" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="go" />
+          </label>
+          <button type="submit" class="big" id="lobby-join-go" hidden>TAP TO JOIN</button>
+        </div>
+        <div class="lobby-status" id="lobby-status" aria-live="polite"></div>
+        <div class="lobby-actions">
+          <button type="button" id="lobby-cancel">CANCEL</button>
+        </div>
+      </form>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

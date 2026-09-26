@@ -4,15 +4,25 @@ import { TextPlane } from './textPlane.js';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 const BLOCK_TYPES = 11; // block1.png .. block11.png map to field values 1..11
+const MAX_BOARDS = 2;
 const PLAYER_GAP = 3;
 const CUBE = 0.92;
 const FRAME = 0.3;
+const PORTRAIT_ASPECT = 0.85; // narrower than this: portrait HUD
+const MINI_SCALE = { landscape: 0.45, portrait: 0.3 };
+const MINI_GAP = 0.8; // between the landscape info column and the mini board
+const FLASH_MS = 350;
+const FLASH_COLORS = { hit: new THREE.Color(0xff2020), attack: new THREE.Color(0xff9a3c) };
 
 /*
  * Each board is a group whose origin is the top-left corner of the well, so
- * cell (x, y) sits at local (x + 0.5, -y - 0.5). Two layouts place the info:
- *   landscape: score, hold and next to the right of the well (desktop, versus)
- *   portrait:  a compact HUD above the well (phones held upright)
+ * cell (x, y) sits at local (x + 0.5, -y - 0.5), times the board's scale.
+ * Layouts place the info around the well:
+ *   landscape:   score, hold and next to the right of the well (desktop, versus)
+ *   portrait:    a compact HUD above the well (phones held upright)
+ *   portraitDuo: portrait with room for the opponent's mini board in the HUD
+ *   mini:        the online opponent: well, piece and powers, name and score
+ *                above; no ghost, hold or next
  * Bounds are the local extents used to centre and fit the camera.
  */
 const LAYOUTS = {
@@ -28,17 +38,58 @@ const LAYOUTS = {
     next: { x: 7.1, y: 3.0, scale: 0.6 },
     powers: { x: 3.55, y: 2.8, step: 0.62, scale: 0.6, rest: 0.5 },
   },
+  portraitDuo: {
+    bounds: { minX: -FRAME, maxX: Width + FRAME, minY: -Height - FRAME, maxY: 8.9 },
+    hold: { x: 0.1, y: 6.2, scale: 0.6 },
+    next: { x: 3.7, y: 6.2, scale: 0.6 },
+    powers: { x: 0.05, y: 3.5, step: 0.66, scale: 0.6, rest: 0.5 },
+  },
+  mini: {
+    bounds: { minX: -FRAME, maxX: Width + FRAME, minY: -22.1, maxY: 5.4 },
+    powers: { x: 1, y: -21, step: 1, scale: 1, rest: 0.8 },
+  },
 };
+
+// Where the portrait HUD texts go: [x, y, scale] per layout.
+const PORTRAIT_TEXT = {
+  portrait: {
+    scoreLabel: [0, 5.5, 1],
+    linesLabel: [3.55, 5.5, 1],
+    levelLabel: [7.1, 5.5, 1],
+    score: [0, 5.0, 1],
+    lines: [3.55, 5.0, 1],
+    level: [7.1, 5.0, 1],
+    hold: [0, 3.8, 1],
+    powers: [3.55, 3.8, 1],
+    next: [7.1, 3.8, 1],
+  },
+  portraitDuo: {
+    scoreLabel: [0, 8.8, 0.9],
+    linesLabel: [2.7, 8.8, 0.9],
+    levelLabel: [5.2, 8.8, 0.9],
+    score: [0, 8.3, 0.9],
+    lines: [2.7, 8.3, 0.9],
+    level: [5.2, 8.3, 0.9],
+    hold: [0, 6.9, 0.9],
+    powers: [0, 4.1, 0.9],
+    next: [3.6, 6.9, 0.9],
+  },
+};
+
+/** Normalises setBoards() input to one { mini } spec per board. */
+function boardSpecs(boards) {
+  const specs = typeof boards === 'number' ? Array.from({ length: boards }, () => ({})) : boards;
+  return specs.slice(0, MAX_BOARDS).map((s) => ({ mini: !!s.mini }));
+}
 
 /**
  * Three.js view of a GameScreen. Every frame the block instances are rebuilt
  * from the game state, so rendering holds no game logic of its own.
  */
 export class Renderer {
-  constructor(container, playerCount) {
+  /** @param boards how many boards to draw, or specs (see setBoards) */
+  constructor(container, boards = 1) {
     this.container = container;
-    this.playerCount = playerCount;
-    this.layout = null;
     this.pxPerUnit = 20;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -57,10 +108,30 @@ export class Renderer {
     this.addBackground();
     this.createBlockMeshes();
     this.boards = [];
-    for (let i = 0; i < playerCount; i++) this.boards.push(this.createBoard(i));
-
-    this.resize();
+    this.setBoards(boards);
     new ResizeObserver(() => this.resize()).observe(container);
+  }
+
+  /**
+   * Replaces the boards, e.g. when switching between solo and online play.
+   * @param boards a count, or [{ mini }] per board; a mini board is the
+   *   online opponent, drawn small next to (or above) board 0
+   */
+  setBoards(boards) {
+    for (const board of this.boards) this.disposeBoard(board);
+    const specs = boardSpecs(boards);
+    const online = specs.some((s) => s.mini);
+    this.boards = specs.map((spec, i) => this.createBoard(i, { ...spec, labelled: !online }));
+    this.resize();
+  }
+
+  disposeBoard(board) {
+    this.scene.remove(board.group);
+    board.group.traverse((obj) => {
+      obj.geometry?.dispose();
+      obj.material?.map?.dispose();
+      obj.material?.dispose();
+    });
   }
 
   addLights() {
@@ -83,7 +154,7 @@ export class Renderer {
 
   createBlockMeshes() {
     const geometry = new THREE.BoxGeometry(CUBE, CUBE, CUBE);
-    const capacity = this.playerCount * (Width * Height + 64);
+    const capacity = MAX_BOARDS * (Width * Height + 64);
     this.solid = [];
     this.ghost = [];
     for (let t = 1; t <= BLOCK_TYPES; t++) {
@@ -109,7 +180,7 @@ export class Renderer {
     this.tmp = new THREE.Object3D();
   }
 
-  createBoard(i) {
+  createBoard(i, { mini = false, labelled = true } = {}) {
     const group = new THREE.Group();
     this.scene.add(group);
 
@@ -121,7 +192,7 @@ export class Renderer {
     back.position.set(Width / 2, -Height / 2, -CUBE / 2 - 0.01);
     group.add(back);
 
-    // Frame around the well.
+    // Frame around the well; its glow flashes on attacks.
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.3, metalness: 0.6 });
     const addBar = (w, h, x, y) => {
       const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, 1.1), frameMat);
@@ -140,36 +211,53 @@ export class Renderer {
     };
 
     // Landscape: info column right of the well.
-    const landscape = {
-      score: text(11, 0, 7, 0.8, '#ffffff'),
-      lines: text(11, -0.9, 7, 0.8, '#ffffff'),
-      level: text(11, -1.8, 7, 0.8, '#ffffff'),
-      hold: text(11, -3.4, 7, 0.8, '#ffff00'),
-      next: text(11, -9.4, 7, 0.8, '#9acd32'),
-      player: text(11, -19.2, 7, 0.8, '#aaaaaa', { fontScale: 0.45 }),
-    };
-    landscape.hold.set('HOLD');
-    landscape.next.set('NEXT');
-    landscape.player.set(`P${i + 1}`);
+    const landscape = mini
+      ? {}
+      : {
+          score: text(11, 0, 7, 0.8, '#ffffff'),
+          lines: text(11, -0.9, 7, 0.8, '#ffffff'),
+          level: text(11, -1.8, 7, 0.8, '#ffffff'),
+          hold: text(11, -3.4, 7, 0.8, '#ffff00'),
+          next: text(11, -9.4, 7, 0.8, '#9acd32'),
+        };
+    if (!mini) {
+      landscape.hold.set('HOLD');
+      landscape.next.set('NEXT');
+      // Local 2-player labels its boards; online the local board is not labelled.
+      if (labelled) {
+        landscape.player = text(11, -19.2, 7, 0.8, '#aaaaaa', { fontScale: 0.45 });
+        landscape.player.set(`P${i + 1}`);
+      }
+    }
 
     // Portrait: three stat columns, then hold / powers / next above the well.
-    const col = [0, 3.55, 7.1];
-    const label = (x, y, str, color = '#b8c0cc') => {
-      const t = text(x, y, 3.2, 0.5, color, { fontScale: 0.6 });
+    const label = (str, color = '#b8c0cc') => {
+      const t = text(0, 0, 3.2, 0.5, color, { fontScale: 0.6 });
       t.set(str);
       return t;
     };
-    const portrait = {
-      scoreLabel: label(col[0], 5.5, 'SCORE'),
-      linesLabel: label(col[1], 5.5, 'LINES'),
-      levelLabel: label(col[2], 5.5, 'LEVEL'),
-      score: text(col[0], 5.0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
-      lines: text(col[1], 5.0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
-      level: text(col[2], 5.0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
-      hold: label(col[0], 3.8, 'HOLD', '#ffff00'),
-      powers: label(col[1], 3.8, 'POWER', '#ff9a3c'),
-      next: label(col[2], 3.8, 'NEXT', '#9acd32'),
-    };
+    const portrait = mini
+      ? {}
+      : {
+          scoreLabel: label('SCORE'),
+          linesLabel: label('LINES'),
+          levelLabel: label('LEVEL'),
+          score: text(0, 0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
+          lines: text(0, 0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
+          level: text(0, 0, 3.3, 0.8, '#ffffff', { fontScale: 0.6 }),
+          hold: label('HOLD', '#ffff00'),
+          powers: label('POWER', '#ff9a3c'),
+          next: label('NEXT', '#9acd32'),
+        };
+
+    // Mini: the opponent's name and score above the well, large enough to
+    // read at mini scale.
+    const miniText = mini
+      ? {
+          name: text(0, 5.3, Width, 2.4, '#ff9a3c', { fontScale: 0.62 }),
+          score: text(0, 2.8, Width, 2.2, '#ffffff', { fontScale: 0.6 }),
+        }
+      : {};
 
     const banner = new TextPlane({ width: Width, height: 1.6, align: 'center', fontScale: 0.55 });
     banner.mesh.position.set(Width / 2, -6, 1.2);
@@ -181,34 +269,91 @@ export class Renderer {
     bannerBack.renderOrder = 9;
     group.add(bannerBack, banner.mesh);
 
-    return { group, landscape, portrait, banner, bannerBack };
+    return {
+      index: i,
+      mini,
+      layout: mini ? 'mini' : 'landscape',
+      scale: 1,
+      group,
+      frameMat,
+      flash: 0,
+      flashColor: FLASH_COLORS.hit,
+      landscape,
+      portrait,
+      miniText,
+      banner,
+      bannerBack,
+    };
   }
 
   refreshText() {
     for (const b of this.boards) {
-      for (const t of [...Object.values(b.landscape), ...Object.values(b.portrait), b.banner]) t.refresh();
+      const texts = [...Object.values(b.landscape), ...Object.values(b.portrait), ...Object.values(b.miniText), b.banner];
+      for (const t of texts) t.refresh();
     }
   }
 
-  /** Portrait HUD only for a single board on a tall screen. */
-  chooseLayout(aspect) {
-    return this.playerCount === 1 && aspect < 0.85 ? 'portrait' : 'landscape';
-  }
+  /**
+   * Places every board and returns the size of the area the camera must fit.
+   * Without a mini board, full-size boards sit side by side (a single one
+   * gets the portrait HUD on a tall screen). With one, it goes right of the
+   * landscape info column, or into the portrait HUD.
+   */
+  applyLayout(aspect) {
+    const tall = aspect < PORTRAIT_ASPECT;
+    const mini = this.boards.find((b) => b.mini);
+    const full = this.boards.filter((b) => !b.mini);
+    const place = (board, layout, x, y, scale) => Object.assign(board, { layout, x, y, scale });
 
-  applyLayout(name) {
-    this.layout = name;
-    const { bounds } = LAYOUTS[name];
-    const spanW = bounds.maxX - bounds.minX;
-    const totalW = this.playerCount * spanW + (this.playerCount - 1) * PLAYER_GAP;
-    const top = -(bounds.maxY + bounds.minY) / 2; // centre vertically on y = 0
+    if (mini) {
+      const main = full[0];
+      const layout = tall ? 'portraitDuo' : 'landscape';
+      const mb = LAYOUTS[layout].bounds;
+      const nb = LAYOUTS.mini.bounds;
+      place(main, layout, 0, 0, 1);
+      if (tall) {
+        // Top-right corner of the HUD, above the well.
+        const s = MINI_SCALE.portrait;
+        place(mini, 'mini', mb.maxX - nb.maxX * s, mb.maxY - nb.maxY * s, s);
+      } else {
+        const s = MINI_SCALE.landscape;
+        place(mini, 'mini', mb.maxX + MINI_GAP - nb.minX * s, mb.maxY - nb.maxY * s, s);
+      }
+    } else {
+      const layout = full.length === 1 && tall ? 'portrait' : 'landscape';
+      const b = LAYOUTS[layout].bounds;
+      const spanW = b.maxX - b.minX;
+      full.forEach((board, i) => place(board, layout, i * (spanW + PLAYER_GAP), 0, 1));
+    }
 
-    this.boards.forEach((board, i) => {
-      const ox = -totalW / 2 - bounds.minX + i * (spanW + PLAYER_GAP);
-      board.group.position.set(ox, top, 0);
-      for (const t of Object.values(board.landscape)) t.mesh.visible = name === 'landscape';
-      for (const t of Object.values(board.portrait)) t.mesh.visible = name === 'portrait';
-    });
-    return { fitW: totalW + 1, fitH: bounds.maxY - bounds.minY + 1 };
+    // Centre the union of all boards on the origin.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const board of this.boards) {
+      const b = LAYOUTS[board.layout].bounds;
+      minX = Math.min(minX, board.x + b.minX * board.scale);
+      maxX = Math.max(maxX, board.x + b.maxX * board.scale);
+      minY = Math.min(minY, board.y + b.minY * board.scale);
+      maxY = Math.max(maxY, board.y + b.maxY * board.scale);
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    for (const board of this.boards) {
+      board.group.position.set(board.x - cx, board.y - cy, 0);
+      board.group.scale.setScalar(board.scale);
+      const portrait = board.layout === 'portrait' || board.layout === 'portraitDuo';
+      for (const t of Object.values(board.landscape)) t.mesh.visible = board.layout === 'landscape';
+      for (const [key, t] of Object.entries(board.portrait)) {
+        t.mesh.visible = portrait;
+        if (!portrait) continue;
+        const [x, y, s] = PORTRAIT_TEXT[board.layout][key];
+        t.mesh.position.set(x, y, 0.6);
+        t.mesh.scale.setScalar(s);
+      }
+    }
+    return { fitW: maxX - minX + 1, fitH: maxY - minY + 1 };
   }
 
   resize() {
@@ -218,7 +363,7 @@ export class Renderer {
     this.camera.aspect = w / h;
 
     // Fit the whole play area (boards, info and power rows).
-    const { fitW, fitH } = this.applyLayout(this.chooseLayout(w / h));
+    const { fitW, fitH } = this.applyLayout(w / h);
     const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
     this.baseDistance = Math.max(fitH / 2 / tan, fitW / 2 / (tan * this.camera.aspect));
     this.camera.updateProjectionMatrix();
@@ -236,16 +381,34 @@ export class Renderer {
     this.shake = Math.max(this.shake, amount);
   }
 
+  /**
+   * Lights up a board's frame for a moment: 'hit' (red) when an attack lands
+   * on it, 'attack' (orange) when we send one to it.
+   */
+  flash(i, kind = 'hit') {
+    const board = this.boards[i];
+    if (!board) return;
+    board.flash = 1;
+    board.flashColor = FLASH_COLORS[kind] ?? FLASH_COLORS.hit;
+  }
+
   draw(game, dtMs) {
     this.time += dtMs / 1000;
     for (const m of this.solid) m.count = 0;
     for (const m of this.ghost) m.count = 0;
 
-    game.players.forEach((field, i) => this.drawPlayer(game, field, this.boards[i]));
+    game.players.forEach((field, i) => this.boards[i] && this.drawPlayer(game, field, this.boards[i]));
+    for (const board of this.boards) this.updateFlash(board, dtMs);
 
     for (const m of [...this.solid, ...this.ghost]) m.instanceMatrix.needsUpdate = true;
     this.updateCamera(dtMs);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  updateFlash(board, dtMs) {
+    if (board.flash <= 0) return;
+    board.flash = Math.max(0, board.flash - dtMs / FLASH_MS);
+    board.frameMat.emissive.copy(board.flashColor).multiplyScalar(board.flash * 1.5);
   }
 
   pushBlock(meshes, value, wx, wy, z = 0, scale = 1) {
@@ -262,7 +425,8 @@ export class Renderer {
   /** Pushes a block at board-local cell coordinates. */
   pushCell(board, meshes, value, x, y, z = 0) {
     const o = board.group.position;
-    this.pushBlock(meshes, value, o.x + x + 0.5, o.y - y - 0.5, z);
+    const s = board.scale;
+    this.pushBlock(meshes, value, o.x + (x + 0.5) * s, o.y - (y + 0.5) * s, z * s, s);
   }
 
   /** Draws a piece in the well at row `row` (its posY, or the ghost row). */
@@ -282,22 +446,25 @@ export class Renderer {
    * vertically centred in a two-row box.
    */
   drawPreview(board, piece, slot) {
-    if (!piece) return;
+    if (!piece || !slot) return;
     const filled = [];
     piece.shape.forEach((cells, y) => cells.forEach((v, x) => v !== 0 && filled.push([x, y, v])));
     const minX = Math.min(...filled.map((c) => c[0]));
     const minY = Math.min(...filled.map((c) => c[1]));
     const rows = Math.max(...filled.map((c) => c[1])) - minY + 1;
     const o = board.group.position;
+    const bs = board.scale;
     const s = slot.scale;
-    const top = o.y + slot.y - (Math.max(0, 2 - rows) / 2) * s;
+    const top = slot.y - (Math.max(0, 2 - rows) / 2) * s;
     for (const [x, y, v] of filled) {
-      this.pushBlock(this.solid, v, o.x + slot.x + (x - minX + 0.5) * s, top - (y - minY + 0.5) * s, 0, s);
+      const lx = slot.x + (x - minX + 0.5) * s;
+      const ly = top - (y - minY + 0.5) * s;
+      this.pushBlock(this.solid, v, o.x + lx * bs, o.y + ly * bs, 0, s * bs);
     }
   }
 
   drawPlayer(game, field, board) {
-    const layout = LAYOUTS[this.layout];
+    const layout = LAYOUTS[board.layout];
 
     if (field.isGameOver) {
       // Rainbow fill, like the original game-over screen.
@@ -314,35 +481,56 @@ export class Renderer {
           this.pushCell(board, this.solid, v, x, y, z);
         }
       }
-      if (field.shadowY > 0) this.drawPiece(board, field.currentPiece, field.shadowY, this.ghost);
-      this.drawPiece(board, field.currentPiece, field.currentPiece.posY);
+      const piece = field.currentPiece;
+      // The mini board (and any RemoteField) has no ghost piece.
+      if (piece && !board.mini && !field.isRemote && field.shadowY > 0) {
+        this.drawPiece(board, piece, field.shadowY, this.ghost);
+      }
+      if (piece) this.drawPiece(board, piece, piece.posY);
     }
 
     // Collected powers; the first one is next to be used, so it's drawn bigger.
     const o = board.group.position;
+    const bs = board.scale;
     const p = layout.powers;
     field.powers.forEach((power, idx) => {
       const scale = idx === 0 ? p.scale : p.rest;
-      this.pushBlock(this.solid, power, o.x + p.x + (idx + 0.5) * p.step, o.y + p.y - 0.5 * p.step, 0, scale);
+      this.pushBlock(this.solid, power, o.x + (p.x + (idx + 0.5) * p.step) * bs, o.y + (p.y - 0.5 * p.step) * bs, 0, scale * bs);
     });
 
-    this.drawPreview(board, field.heldPiece, layout.hold);
-    this.drawPreview(board, field.nextPiece, layout.next);
+    if (board.mini) {
+      board.miniText.name.set(game.names?.[board.index] ?? `P${board.index + 1}`);
+      board.miniText.score.set(`${field.score}`);
+    } else {
+      this.drawPreview(board, field.heldPiece, layout.hold);
+      this.drawPreview(board, field.nextPiece, layout.next);
+      const { landscape, portrait } = board;
+      landscape.score.set(`SCORE ${field.score}`);
+      landscape.lines.set(`LINES ${field.lines}`);
+      landscape.level.set(`LEVEL ${field.level + 1}`);
+      portrait.score.set(`${field.score}`);
+      portrait.lines.set(`${field.lines}`);
+      portrait.level.set(`${field.level + 1}`);
+    }
 
-    const { landscape, portrait } = board;
-    landscape.score.set(`SCORE ${field.score}`);
-    landscape.lines.set(`LINES ${field.lines}`);
-    landscape.level.set(`LEVEL ${field.level + 1}`);
-    portrait.score.set(`${field.score}`);
-    portrait.lines.set(`${field.lines}`);
-    portrait.level.set(`${field.level + 1}`);
-
-    let banner = '';
-    if (game.pause) banner = 'PAUSE';
-    else if (field.isWinner) banner = 'WINNER';
-    else if (game.allOut) banner = game.players.length > 1 ? 'DRAW' : 'GAME OVER';
+    const banner = this.bannerText(game, field, board.index);
     board.banner.set(banner);
     board.banner.mesh.visible = board.bannerBack.visible = banner !== '';
+  }
+
+  bannerText(game, field, i) {
+    if (game.online) {
+      // The host's result, else pause, else the 3-2-1 countdown on our own board.
+      if (game.result === 'draw') return 'DRAW';
+      if (game.result !== null) return game.result === i ? `${game.names?.[i] ?? ''} WINS`.trim() : '';
+      if (game.pause) return 'PAUSE';
+      if (game.countdown > 0 && i === 0) return String(Math.ceil(game.countdown / 1000));
+      return '';
+    }
+    if (game.pause) return 'PAUSE';
+    if (field.isWinner) return 'WINNER';
+    if (game.allOut) return game.players.length > 1 ? 'DRAW' : 'GAME OVER';
+    return '';
   }
 
   updateCamera(dtMs) {

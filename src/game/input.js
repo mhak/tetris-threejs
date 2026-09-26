@@ -38,6 +38,18 @@ const STICK_THRESHOLD = 0.5;
 
 export const emptyState = () => Object.fromEntries(BUTTONS.map((b) => [b, false]));
 
+/** Typing a name or join code must not steer the game or be blocked. */
+export function isTextField(target) {
+  const tag = target?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable === true;
+}
+
+/** Keys the focused element handles itself: typing in a field, Space or Enter on a button. */
+function isControlKey(e) {
+  if (isTextField(e.target)) return true;
+  return e.target?.tagName === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter');
+}
+
 /** In solo play player 1 can use either keyboard layout. */
 function mergeLayouts(layouts) {
   const merged = {};
@@ -60,10 +72,11 @@ export class Input {
     target.addEventListener('keydown', (e) => {
       // Leave browser shortcuts (Ctrl/Cmd/Alt + key) alone and out of the game.
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isControlKey(e)) return;
       if (gameKeys.has(e.code)) e.preventDefault();
       this.keys.add(e.code);
       this.tapped.add(e.code);
-      this.onAnyInput?.();
+      this.onAnyInput?.(e);
     });
     target.addEventListener('keyup', (e) => {
       // macOS doesn't send keyup for keys released while Cmd was held.
