@@ -4,6 +4,7 @@ import { TextPlane } from './textPlane.js';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 const BLOCK_TYPES = 11; // block1.png .. block11.png map to field values 1..11
+const MAX_BOARDS = 2;
 const PLAYER_GAP = 3;
 const CUBE = 0.92;
 const FRAME = 0.3;
@@ -35,9 +36,9 @@ const LAYOUTS = {
  * from the game state, so rendering holds no game logic of its own.
  */
 export class Renderer {
-  constructor(container, playerCount) {
+  /** @param boards how many boards to draw (see setBoards) */
+  constructor(container, boards = 1) {
     this.container = container;
-    this.playerCount = playerCount;
     this.layout = null;
     this.pxPerUnit = 20;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -57,10 +58,26 @@ export class Renderer {
     this.addBackground();
     this.createBlockMeshes();
     this.boards = [];
-    for (let i = 0; i < playerCount; i++) this.boards.push(this.createBoard(i));
-
-    this.resize();
+    this.setBoards(boards);
     new ResizeObserver(() => this.resize()).observe(container);
+  }
+
+  /** Replaces the boards, e.g. when switching between solo and online play. */
+  setBoards(count) {
+    for (const board of this.boards) this.disposeBoard(board);
+    this.boards = [];
+    for (let i = 0; i < Math.min(count, MAX_BOARDS); i++) this.boards.push(this.createBoard(i));
+    this.layout = null;
+    this.resize();
+  }
+
+  disposeBoard(board) {
+    this.scene.remove(board.group);
+    board.group.traverse((obj) => {
+      obj.geometry?.dispose();
+      obj.material?.map?.dispose();
+      obj.material?.dispose();
+    });
   }
 
   addLights() {
@@ -83,7 +100,7 @@ export class Renderer {
 
   createBlockMeshes() {
     const geometry = new THREE.BoxGeometry(CUBE, CUBE, CUBE);
-    const capacity = this.playerCount * (Width * Height + 64);
+    const capacity = MAX_BOARDS * (Width * Height + 64);
     this.solid = [];
     this.ghost = [];
     for (let t = 1; t <= BLOCK_TYPES; t++) {
@@ -192,14 +209,15 @@ export class Renderer {
 
   /** Portrait HUD only for a single board on a tall screen. */
   chooseLayout(aspect) {
-    return this.playerCount === 1 && aspect < 0.85 ? 'portrait' : 'landscape';
+    return this.boards.length === 1 && aspect < 0.85 ? 'portrait' : 'landscape';
   }
 
   applyLayout(name) {
     this.layout = name;
     const { bounds } = LAYOUTS[name];
     const spanW = bounds.maxX - bounds.minX;
-    const totalW = this.playerCount * spanW + (this.playerCount - 1) * PLAYER_GAP;
+    const count = this.boards.length;
+    const totalW = count * spanW + (count - 1) * PLAYER_GAP;
     const top = -(bounds.maxY + bounds.minY) / 2; // centre vertically on y = 0
 
     this.boards.forEach((board, i) => {
@@ -241,7 +259,7 @@ export class Renderer {
     for (const m of this.solid) m.count = 0;
     for (const m of this.ghost) m.count = 0;
 
-    game.players.forEach((field, i) => this.drawPlayer(game, field, this.boards[i]));
+    game.players.forEach((field, i) => this.boards[i] && this.drawPlayer(game, field, this.boards[i]));
 
     for (const m of [...this.solid, ...this.ghost]) m.instanceMatrix.needsUpdate = true;
     this.updateCamera(dtMs);
@@ -314,8 +332,10 @@ export class Renderer {
           this.pushCell(board, this.solid, v, x, y, z);
         }
       }
-      if (field.shadowY > 0) this.drawPiece(board, field.currentPiece, field.shadowY, this.ghost);
-      this.drawPiece(board, field.currentPiece, field.currentPiece.posY);
+      const piece = field.currentPiece;
+      // A RemoteField has no ghost piece.
+      if (piece && !field.isRemote && field.shadowY > 0) this.drawPiece(board, piece, field.shadowY, this.ghost);
+      if (piece) this.drawPiece(board, piece, piece.posY);
     }
 
     // Collected powers; the first one is next to be used, so it's drawn bigger.

@@ -2,21 +2,28 @@
 // Rendering lives in src/render; audio playback in src/audio.js.
 import { Block } from './block.js';
 import { TetrisField } from './tetrisField.js';
+import { RemoteField } from './remoteField.js';
 import { emptyState } from './input.js';
 
 // Add Line and Drop target opponents, so solo play only gets self-powers.
 const SOLO_POWERS = [Block.ClearLine, Block.LeftSlide];
 
 export class GameScreen {
-  constructor({ playerCount = 2, sounds, random = Math.random } = {}) {
-    this.playerCount = playerCount;
+  /**
+   * @param online versus against another device: player 0 is the local board
+   *   and player 1 a RemoteField that mirrors the opponent's snapshots
+   */
+  constructor({ playerCount = 2, sounds, random = Math.random, online = false } = {}) {
+    this.online = online;
+    this.playerCount = online ? 2 : playerCount;
     this.sounds = sounds;
     this.random = random;
+    this.round = 0;
     this.players = [];
     this.oldStates = [];
     this.keysAccumulation = [];
     this.pause = false;
-    for (let i = 0; i < playerCount; i++) {
+    for (let i = 0; i < this.playerCount; i++) {
       this.players.push(this.createField(i));
       this.oldStates.push(emptyState());
       this.keysAccumulation.push(0);
@@ -24,6 +31,9 @@ export class GameScreen {
   }
 
   createField(i) {
+    if (this.online && i > 0) {
+      return new RemoteField(i, { round: this.round, onAttack: (kind) => this.onAttack?.(kind) });
+    }
     const options = { sounds: this.sounds, random: this.random };
     if (this.playerCount === 1) options.powerList = SOLO_POWERS;
     return new TetrisField(i, options);
@@ -59,7 +69,8 @@ export class GameScreen {
 
     for (let i = 0; i < this.players.length; i++) {
       const playerField = this.players[i];
-      if (playerField.isGameOver) continue;
+      // A remote board is run by the other device; we only draw it.
+      if (playerField.isRemote || playerField.isGameOver) continue;
 
       // Solo play has no winner; the round ends at game over instead.
       playerField.isWinner =
@@ -168,6 +179,13 @@ export class GameScreen {
     if (power === Block.LeftSlide) {
       playerField.leftSlide();
     }
+  }
+
+  /** Online: a fresh board for the given round. */
+  startRound(round) {
+    this.round = round;
+    this.pause = false;
+    this.restartGame();
   }
 
   restartGame() {

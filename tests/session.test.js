@@ -28,8 +28,8 @@ test('a guest joins with the code and both learn the other name', async () => {
   const g = guest();
   await g.open();
   await flush();
-  assert.equal(host.state, 'connected');
-  assert.equal(g.state, 'connected');
+  assert.equal(host.state, 'playing');
+  assert.equal(g.state, 'playing');
   assert.equal(host.remoteName, 'SAM');
   assert.equal(g.remoteName, 'ALEX');
   assert.equal(g.token, host.token);
@@ -55,7 +55,7 @@ test('a second guest is turned away with full', async () => {
   await flush();
   assert.equal(g2.state, 'closed');
   assert.equal(g2.closeReason, 'full');
-  assert.equal(g1.state, 'connected');
+  assert.equal(g1.state, 'playing');
   assert.equal(host.remoteName, 'SAM');
 });
 
@@ -121,4 +121,50 @@ test('the host can rename itself until the guest arrives', async () => {
   assert.equal(g.remoteName, 'ROBIN');
   host.setLocalName('late');
   assert.equal(host.localName, 'ROBIN');
+});
+
+const idleInput = () => ({ left: false, right: false, down: false, up: false, a: false, x: false, y: false, rb: false, lt: false, rt: false, start: false });
+
+test('each side mirrors the other board from snapshots', async () => {
+  const { clock, host, guest } = room();
+  await host.open();
+  const g = guest();
+  await g.open();
+  await flush();
+  const hostBoard = host.game.players[0];
+  hostBoard.movePieceHardDrop();
+  clock.advance(100);
+  host.update(16, idleInput);
+  g.update(16, idleInput);
+  await flush();
+  assert.deepEqual(g.game.players[1].field, hostBoard.field);
+  assert.deepEqual(host.game.players[1].field, g.game.players[0].field);
+  assert.equal(g.game.players[1].currentPiece.kind, hostBoard.currentPiece.kind);
+});
+
+test('snapshots are only sent on a change, at most every 50 ms', async () => {
+  const { clock, host, guest } = room();
+  await host.open();
+  const g = guest();
+  await g.open();
+  await flush();
+  const sent = [];
+  const send = host.transport.send.bind(host.transport);
+  host.transport.send = (m) => {
+    if (m.t === 'state') sent.push(m);
+    send(m);
+  };
+  clock.advance(100);
+  host.update(16, idleInput);
+  assert.equal(sent.length, 1);
+  host.game.players[0].movePieceLeft();
+  clock.advance(10);
+  host.update(16, idleInput); // changed, but within 50 ms of the last one
+  assert.equal(sent.length, 1);
+  clock.advance(50);
+  host.update(16, idleInput);
+  assert.equal(sent.length, 2);
+  clock.advance(100);
+  host.update(16, idleInput); // nothing changed
+  assert.equal(sent.length, 2);
 });

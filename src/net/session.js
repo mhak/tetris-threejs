@@ -1,14 +1,16 @@
 // Room state machine for online play (docs/online-2p-spec.md, section 7).
 //
-//   idle -> hosting -> waiting -> connected
-//   idle -> joining -> connected
+//   idle -> hosting -> waiting -> playing
+//   idle -> joining -> playing
 //   any -> closed (bye, cancel, fatal error)
-import { BUILD_ID, MSG, isMessage } from './protocol.js';
+import { BUILD_ID, MSG, isMessage, snapshotOf } from './protocol.js';
 import { cleanName } from './playerName.js';
 import { generateCode } from './joinCode.js';
+import { GameScreen } from '../game/gameScreen.js';
 
 export const JOIN_TIMEOUT_MS = 15000;
 const HOST_CODE_TRIES = 5;
+const SNAPSHOT_MS = 50; // at most 20 snapshots a second
 
 export const realClock = {
   now: () => Date.now(),
@@ -29,7 +31,16 @@ export class Session {
    * @param transport a Transport (PeerTransport, or LoopbackTransport in tests)
    * @param code the room to join (guest only; the host makes its own)
    */
-  constructor({ role, transport, name, code = null, clock = realClock, buildId = BUILD_ID, makeCode = generateCode }) {
+  constructor({
+    role,
+    transport,
+    name,
+    code = null,
+    sounds,
+    clock = realClock,
+    buildId = BUILD_ID,
+    makeCode = generateCode,
+  }) {
     this.role = role;
     this.transport = transport;
     this.localName = cleanName(name);
@@ -45,6 +56,10 @@ export class Session {
     // Something the host should mention while it keeps waiting, e.g. 'version'.
     this.notice = null;
     this.timeouts = new Set();
+    // Player 0 is our board, player 1 mirrors the opponent's snapshots.
+    this.game = new GameScreen({ online: true, sounds });
+    this.lastSnapshot = '';
+    this.lastSnapshotAt = -Infinity;
     this.onChange = () => {};
     transport.onMessage = (msg, conn) => this.receive(msg, conn);
     transport.onState = (state) => this.transportState(state);
@@ -61,6 +76,11 @@ export class Session {
 
   get isOpen() {
     return this.state !== 'idle' && this.state !== 'closed';
+  }
+
+  /** True once a round has started: the game is shown instead of the lobby. */
+  get inRoom() {
+    return this.state === 'playing';
   }
 
   setState(state) {
@@ -127,6 +147,30 @@ export class Session {
     this.send({ t: MSG.hello, v: this.buildId, name: this.localName });
   }
 
+  /** Once per frame: runs our board and tells the opponent what changed. */
+  update(elapsedMs, getState) {
+    if (!this.inRoom) return;
+    this.game.update(elapsedMs, getState);
+    this.sendSnapshot();
+  }
+
+  sendSnapshot() {
+    const now = this.clock.now();
+    if (now - this.lastSnapshotAt < SNAPSHOT_MS) return;
+    const snapshot = snapshotOf(this.game.players[0], this.game.round);
+    const key = JSON.stringify(snapshot);
+    if (key === this.lastSnapshot) return;
+    this.lastSnapshot = key;
+    this.lastSnapshotAt = now;
+    this.send(snapshot);
+  }
+
+  startRound(round) {
+    this.game.startRound(round);
+    this.lastSnapshot = '';
+    this.setState('playing');
+  }
+
   receive(msg, conn) {
     if (!isMessage(msg) || this.state === 'closed') return;
     if (this.isHost && conn !== this.transport.current) {
@@ -140,6 +184,9 @@ export class Session {
         return this.fail('full');
       case MSG.version:
         return this.fail('version');
+      case MSG.state:
+        this.game.players[1].applySnapshot(msg);
+        return;
     }
   }
 
@@ -160,7 +207,7 @@ export class Session {
     this.remoteName = cleanName(msg.name);
     this.notice = null;
     this.send({ t: MSG.hello, v: this.buildId, name: this.localName, token: this.token });
-    this.setState('connected');
+    this.startRound(1);
   }
 
   /** Guest: the host's answer to our hello. */
@@ -173,7 +220,7 @@ export class Session {
     this.cancel(this.joinTimer);
     this.token = typeof msg.token === 'string' ? msg.token : null;
     this.remoteName = cleanName(msg.name);
-    this.setState('connected');
+    this.startRound(1);
   }
 
   transportState(state) {

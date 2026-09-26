@@ -20,26 +20,49 @@ const setTouch = () => document.body.classList.add('touch');
 if (window.matchMedia('(pointer: coarse)').matches) setTouch();
 window.addEventListener('pointerdown', (e) => e.pointerType === 'touch' && setTouch());
 
+const params = new URLSearchParams(location.search);
+// ?debug=loopback runs a host and a guest side by side in one tab over an
+// in-memory transport: the left one plays with WASD, the right one with arrows.
+const DEBUG_LOOPBACK = params.get('debug') === 'loopback';
+
 const app = document.getElementById('app');
+const view = DEBUG_LOOPBACK ? splitView() : app;
 const audio = new Audio();
-const input = new Input({ playerCount: PLAYER_COUNT });
-const renderer = new Renderer(app, PLAYER_COUNT);
+const input = new Input({ playerCount: DEBUG_LOOPBACK ? 2 : PLAYER_COUNT });
+const renderer = new Renderer(view, PLAYER_COUNT);
 const touch = new TouchControls(app, document.getElementById('touch-bar'), () => renderer.pxPerUnit);
 const overlay = document.getElementById('start');
 const menu = document.getElementById('menu');
 const lobby = new Lobby();
 
 // Online play stays behind ?online=1 until it is finished; a ?join= link always works.
-const params = new URLSearchParams(location.search);
 const joinParam = normalizeCode(params.get('join'));
 const ONLINE = params.get('online') === '1' || isValidCode(joinParam);
 document.getElementById('online-buttons').hidden = !ONLINE;
 
-let game = null;
-let session = null;
+let game = null; // solo game
+let session = null; // online room; its game is shown once a round starts
+let debugGuest = null; // ?debug=loopback: { session, renderer } for the right half
 let last = performance.now();
 
-document.fonts?.load(`32px ${FONT}`).then(() => renderer.refreshText());
+document.fonts?.load(`32px ${FONT}`).then(() => {
+  renderer.refreshText();
+  debugGuest?.renderer.refreshText();
+});
+
+function splitView() {
+  app.classList.add('split');
+  const left = document.createElement('div');
+  const right = document.createElement('div');
+  right.id = 'debug-right';
+  app.append(left, right);
+  return left;
+}
+
+/** The game on screen: the online one while in a room, else solo. */
+function activeGame() {
+  return session?.inRoom ? session.game : game;
+}
 
 function getState(i) {
   const state = input.getState(i);
@@ -47,18 +70,23 @@ function getState(i) {
   const t = touch.getState();
   for (const [button, down] of Object.entries(t)) if (down) state[button] = true;
   // After game over (or a win), a tap on the board starts the next round.
-  if (game?.isFinished && t.a) state.start = true;
+  if (activeGame()?.isFinished && t.a) state.start = true;
   return state;
 }
 
+function addEffects(g, r = renderer) {
+  g.onHardDrop = () => r.addShake(0.25);
+  g.onTetris = () => r.addShake(0.9);
+  g.onBoom = () => r.addShake(1.4);
+}
+
 function start() {
-  if (game || lobby.isOpen) return;
+  if (game || session || lobby.isOpen) return;
+  if (DEBUG_LOOPBACK) return startLoopback();
   overlay.classList.add('hidden');
   audio.unlock();
   game = new GameScreen({ playerCount: PLAYER_COUNT, sounds: audio });
-  game.onHardDrop = () => renderer.addShake(0.25);
-  game.onTetris = () => renderer.addShake(0.9);
-  game.onBoom = () => renderer.addShake(1.4);
+  addEffects(game);
   // Don't let the key that dismissed the overlay count as a fresh press.
   game.oldStates = game.oldStates.map((_, i) => getState(i));
 }
@@ -96,25 +124,77 @@ lobby.onJoin = (name, code) => startSession('guest', { name, code });
 // The host can still change its name while it waits; it is sent when the guest arrives.
 lobby.onNameChange = (name) => session?.setLocalName(name);
 lobby.onCancel = () => {
-  session?.leave();
-  session = null;
+  endSession();
   showMenu();
 };
 
 async function startSession(role, { name = lobby.name, code = null } = {}) {
-  session?.leave();
+  endSession();
   audio.unlock();
   const { PeerTransport } = await import('./net/peerTransport.js');
   if (!lobby.isOpen) return; // cancelled while loading
-  const s = new Session({ role, name, code, transport: new PeerTransport() });
+  openSession(new Session({ role, name, code, sounds: audio, transport: new PeerTransport() }));
+}
+
+function openSession(s) {
   session = s;
-  s.onChange = () => s === session && updateLobby();
+  addEffects(s.game);
+  s.onChange = () => s === session && updateSession();
   s.open();
 }
 
-function updateLobby() {
+function endSession() {
+  session?.leave();
+  session = null;
+}
+
+async function startLoopback() {
+  overlay.classList.add('hidden');
+  audio.unlock();
+  const { LoopbackNetwork, LoopbackTransport } = await import('./net/transport.js');
+  const network = new LoopbackNetwork({ latencyMs: Number(params.get('latency') ?? 40) });
+  const host = new Session({ role: 'host', name: 'HOST', sounds: audio, transport: new LoopbackTransport(network) });
+  openSession(host);
+  await host.open();
+  const guest = new Session({ role: 'guest', name: 'GUEST', code: host.code, transport: new LoopbackTransport(network) });
+  debugGuest = { session: guest, renderer: new Renderer(document.getElementById('debug-right'), 2) };
+  addEffects(guest.game, debugGuest.renderer);
+  window.debugSessions = { host, guest }; // for poking at from the console
+  guest.open();
+}
+
+/** Switches between the lobby and the match as the room changes state. */
+function updateSession() {
   const s = session;
-  lobby.setBusy(s.state === 'joining' || s.state === 'connected');
+  if (s.inRoom) {
+    if (!overlay.classList.contains('hidden') || renderer.boards.length !== 2) enterRoom(s);
+    return;
+  }
+  if (s.state === 'closed' && overlay.classList.contains('hidden')) {
+    leaveRoom();
+    return;
+  }
+  updateLobby(s);
+}
+
+function enterRoom(s) {
+  lobby.close();
+  overlay.classList.add('hidden');
+  renderer.setBoards(2);
+  if (s.role === 'guest') dropJoinParam();
+  // Don't let the tap or key that joined count as a fresh press.
+  s.game.oldStates[0] = getState(0);
+}
+
+function leaveRoom() {
+  session = null;
+  renderer.setBoards(PLAYER_COUNT);
+  overlay.classList.remove('hidden');
+  showMenu();
+}
+
+function updateLobby(s) {
+  lobby.setBusy(s.state === 'joining');
   switch (s.state) {
     case 'hosting':
       lobby.setStatus('CREATING ROOM...');
@@ -127,11 +207,6 @@ function updateLobby() {
       break;
     case 'joining':
       lobby.setStatus('CONNECTING...');
-      break;
-    case 'connected':
-      lobby.lockName();
-      lobby.setStatus(`CONNECTED TO ${s.remoteName}`, 'ok');
-      if (s.role === 'guest') dropJoinParam();
       break;
     case 'closed':
       if (s.closeReason !== 'left') lobby.showError(s.closeReason);
@@ -158,14 +233,21 @@ function frame(now) {
   const dt = Math.min(now - last, MAX_FRAME_MS);
   last = now;
 
-  if (!game && !lobby.isOpen && input.anyPadButtonPressed()) start();
+  if (!game && !session && !lobby.isOpen && input.anyPadButtonPressed()) start();
 
-  if (game) {
-    game.update(dt, getState);
-    audio.update({ paused: game.pause, stopped: game.isFinished });
-    renderer.draw(game, dt);
+  const shown = activeGame();
+  if (session?.inRoom) session.update(dt, getState);
+  else if (game) game.update(dt, getState);
+  if (shown) {
+    audio.update({ paused: shown.pause, stopped: shown.isFinished });
+    renderer.draw(shown, dt);
   } else {
     renderer.draw(idle, dt);
+  }
+  if (debugGuest) {
+    const g = debugGuest.session;
+    g.update(dt, (i) => (i === 0 ? input.getState(1) : input.getState(0)));
+    debugGuest.renderer.draw(g.inRoom ? g.game : idle, dt);
   }
   input.endFrame();
   touch.endFrame();

@@ -241,3 +241,7 @@ body.touch .controls.touch-only { display: grid !important; }
 .lobby-status[data-tone="ok"] { color: #9acd32; }
 
 .lobby-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+
+/* ?debug=loopback: host on the left, guest on the right. */
+#app.split { display: flex; }
+#app.split > div { position: relative; flex: 1; min-width: 0; }
