@@ -5,6 +5,9 @@ import { Input } from './game/input.js';
 import { Renderer } from './render/renderer.js';
 import { FONT } from './render/textPlane.js';
 import { TouchControls } from './touch.js';
+import { Lobby } from './ui/lobby.js';
+import { Session } from './net/session.js';
+import { isValidCode, normalizeCode } from './net/joinCode.js';
 
 // 2-player versus is disabled for now; it will be added back later.
 // To re-enable it, switch these lines (and uncomment the P2 controls in index.html).
@@ -23,8 +26,17 @@ const input = new Input({ playerCount: PLAYER_COUNT });
 const renderer = new Renderer(app, PLAYER_COUNT);
 const touch = new TouchControls(app, document.getElementById('touch-bar'), () => renderer.pxPerUnit);
 const overlay = document.getElementById('start');
+const menu = document.getElementById('menu');
+const lobby = new Lobby();
+
+// Online play stays behind ?online=1 until it is finished; a ?join= link always works.
+const params = new URLSearchParams(location.search);
+const joinParam = normalizeCode(params.get('join'));
+const ONLINE = params.get('online') === '1' || isValidCode(joinParam);
+document.getElementById('online-buttons').hidden = !ONLINE;
 
 let game = null;
+let session = null;
 let last = performance.now();
 
 document.fonts?.load(`32px ${FONT}`).then(() => renderer.refreshText());
@@ -40,7 +52,7 @@ function getState(i) {
 }
 
 function start() {
-  if (game) return;
+  if (game || lobby.isOpen) return;
   overlay.classList.add('hidden');
   audio.unlock();
   game = new GameScreen({ playerCount: PLAYER_COUNT, sounds: audio });
@@ -51,8 +63,91 @@ function start() {
   game.oldStates = game.oldStates.map((_, i) => getState(i));
 }
 
-input.onAnyInput = start;
+// Any key or click on the start screen starts solo play, except on the online
+// controls and while the create / join panel is open.
+input.onAnyInput = (e) => {
+  if (!e?.target?.closest?.('button')) start();
+};
 overlay.addEventListener('click', start);
+
+function showMenu() {
+  lobby.close();
+  menu.hidden = false;
+}
+
+function openLobby(mode, code, tapToJoin) {
+  menu.hidden = true;
+  if (mode === 'create') {
+    lobby.openCreate();
+    startSession('host');
+  } else {
+    lobby.openJoin(code, { tapToJoin });
+  }
+}
+
+for (const [id, mode] of [['create-room', 'create'], ['join-room', 'join']]) {
+  document.getElementById(id).addEventListener('click', (e) => {
+    e.stopPropagation();
+    openLobby(mode);
+  });
+}
+
+lobby.onJoin = (name, code) => startSession('guest', { name, code });
+// The host can still change its name while it waits; it is sent when the guest arrives.
+lobby.onNameChange = (name) => session?.setLocalName(name);
+lobby.onCancel = () => {
+  session?.leave();
+  session = null;
+  showMenu();
+};
+
+async function startSession(role, { name = lobby.name, code = null } = {}) {
+  session?.leave();
+  audio.unlock();
+  const { PeerTransport } = await import('./net/peerTransport.js');
+  if (!lobby.isOpen) return; // cancelled while loading
+  const s = new Session({ role, name, code, transport: new PeerTransport() });
+  session = s;
+  s.onChange = () => s === session && updateLobby();
+  s.open();
+}
+
+function updateLobby() {
+  const s = session;
+  lobby.setBusy(s.state === 'joining' || s.state === 'connected');
+  switch (s.state) {
+    case 'hosting':
+      lobby.setStatus('CREATING ROOM...');
+      break;
+    case 'waiting':
+      lobby.showCode(s.code);
+      lobby.setStatus(
+        s.notice === 'version' ? 'SOMEONE TRIED TO JOIN FROM A DIFFERENT VERSION.' : 'WAITING FOR OPPONENT...',
+      );
+      break;
+    case 'joining':
+      lobby.setStatus('CONNECTING...');
+      break;
+    case 'connected':
+      lobby.lockName();
+      lobby.setStatus(`CONNECTED TO ${s.remoteName}`, 'ok');
+      if (s.role === 'guest') dropJoinParam();
+      break;
+    case 'closed':
+      if (s.closeReason !== 'left') lobby.showError(s.closeReason);
+      break;
+  }
+}
+
+/** A reload after joining must not try to join a finished room again. */
+function dropJoinParam() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has('join')) return;
+  url.searchParams.delete('join');
+  history.replaceState(null, '', url);
+}
+
+if (isValidCode(joinParam)) openLobby('join', joinParam, true);
 
 // Pause when the tab or app goes to the background (e.g. a phone call).
 document.addEventListener('visibilitychange', () => {
@@ -63,7 +158,7 @@ function frame(now) {
   const dt = Math.min(now - last, MAX_FRAME_MS);
   last = now;
 
-  if (!game && input.anyPadButtonPressed()) start();
+  if (!game && !lobby.isOpen && input.anyPadButtonPressed()) start();
 
   if (game) {
     game.update(dt, getState);

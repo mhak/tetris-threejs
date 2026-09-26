@@ -27,10 +27,14 @@
       </div>
     </div>
     <div id="start">
-      <div class="panel">
+      <div class="panel" id="menu">
         <h1>TETRIS</h1>
         <div class="blink desktop-only">PRESS ANY KEY OR BUTTON</div>
         <div class="blink touch-only">TAP TO START</div>
+        <div class="online-buttons" id="online-buttons" hidden>
+          <button type="button" id="create-room">CREATE ROOM</button>
+          <button type="button" id="join-room">JOIN ROOM</button>
+        </div>
         <div class="controls touch-only">
           <div>
             <h2>TOUCH</h2>
@@ -85,6 +89,27 @@
           </div>
         </div>
       </div>
+      <form class="panel lobby" id="lobby" hidden autocomplete="off">
+        <h1 id="lobby-title">JOIN ROOM</h1>
+        <label class="field">
+          <span>NAME</span>
+          <input id="lobby-name" maxlength="10" placeholder="PLAYER" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="done" />
+        </label>
+        <div id="lobby-host" hidden>
+          <div class="room-code" id="room-code" aria-label="Join code"></div>
+        </div>
+        <div id="lobby-join" hidden>
+          <label class="field">
+            <span>CODE</span>
+            <input id="lobby-code" class="code-input" maxlength="5" placeholder="-----" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="go" />
+          </label>
+          <button type="submit" class="big" id="lobby-join-go" hidden>TAP TO JOIN</button>
+        </div>
+        <div class="lobby-status" id="lobby-status" aria-live="polite"></div>
+        <div class="lobby-actions">
+          <button type="button" id="lobby-cancel">CANCEL</button>
+        </div>
+      </form>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
