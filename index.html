@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+    <title>Tetris Three.js</title>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="app"></div>
+      <div id="touch-bar" class="touch-only" aria-label="Touch controls">
+        <button data-action="rb" aria-label="Hold"><span class="icon">&#x21C4;</span><span>HOLD</span></button>
+        <button data-action="x" aria-label="Rotate left"><span class="icon">&#x21BA;</span><span>ROT L</span></button>
+        <button data-action="a" aria-label="Rotate right"><span class="icon">&#x21BB;</span><span>ROT R</span></button>
+        <button data-action="y" aria-label="Use power"><span class="icon">&#x2605;</span><span>POWER</span></button>
+        <button data-action="start" aria-label="Pause"><span class="icon">&#x23F8;</span><span>PAUSE</span></button>
+      </div>
+    </div>
+    <div id="start">
+      <div class="panel">
+        <h1>TETRIS</h1>
+        <div class="blink desktop-only">PRESS ANY KEY OR BUTTON</div>
+        <div class="blink touch-only">TAP TO START</div>
+        <div class="controls touch-only">
+          <div>
+            <h2>TOUCH</h2>
+            <dl>
+              <dt>Drag &larr; &rarr;</dt><dd>Move</dd>
+              <dt>Drag &darr;</dt><dd>Soft drop</dd>
+              <dt>Flick &darr;</dt><dd>Hard drop</dd>
+              <dt>Tap</dt><dd>Rotate</dd>
+              <dt>Flick &uarr;</dt><dd>Hold</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="controls desktop-only">
+          <div>
+            <h2>KEYBOARD</h2>
+            <dl>
+              <dt>A D / &larr; &rarr;</dt><dd>Move</dd>
+              <dt>S / &darr;</dt><dd>Soft drop</dd>
+              <dt>W / &uarr;</dt><dd>Hard drop</dd>
+              <dt>Q E / , .</dt><dd>Rotate</dd>
+              <dt>R / /</dt><dd>Hold</dd>
+              <dt>F / L</dt><dd>Use power</dd>
+              <dt>Z C / K ;</dt><dd>Cycle powers</dd>
+              <dt>Space / Enter</dt><dd>Pause / restart</dd>
+            </dl>
+          </div>
+          <!-- 2-player mode is disabled for now (see PLAYER_COUNT in src/main.js).
+          <div>
+            <h2>PLAYER 2</h2>
+            <dl>
+              <dt>&larr; / &rarr;</dt><dd>Move</dd>
+              <dt>&darr;</dt><dd>Soft drop</dd>
+              <dt>&uarr;</dt><dd>Hard drop</dd>
+              <dt>, / .</dt><dd>Rotate</dd>
+              <dt>/</dt><dd>Hold</dd>
+              <dt>L</dt><dd>Use power</dd>
+              <dt>K / ;</dt><dd>Cycle powers</dd>
+              <dt>Enter</dt><dd>Pause / restart</dd>
+            </dl>
+          </div>
+          -->
+          <div>
+            <h2>GAMEPAD</h2>
+            <dl>
+              <dt>Stick/D-pad</dt><dd>Move, up = hard drop</dd>
+              <dt>A / X</dt><dd>Rotate R / L</dd>
+              <dt>RB</dt><dd>Hold</dd>
+              <dt>Y</dt><dd>Use power</dd>
+              <dt>LT / RT</dt><dd>Cycle powers</dd>
+              <dt>Start</dt><dd>Pause / restart</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
