@@ -9,8 +9,9 @@ export class Tetromino {
     this.orientation = 0;
   }
 
-  get size() {
-    return this.shape.length;
+  /** Turns the piece back to its spawn orientation. */
+  resetRotation() {
+    while (this.orientation !== 0) this.rotateLeft();
   }
 
   rotateLeft() {

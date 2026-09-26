@@ -264,13 +264,13 @@ export class Renderer {
     texts.lines.set(`LINES ${field.lines}`);
     texts.level.set(`LEVEL ${field.level + 1}`);
 
-    const infoOx = infoX - ox; // piece offset relative to board origin
-    this.drawPiece(field.heldPiece, ox + infoOx, 4.6, { info: true, scale: 0.8 });
-    this.drawPiece(field.nextPiece, ox + infoOx, 10.6, { info: true, scale: 0.8 });
+    this.drawPiece(field.heldPiece, infoX, 4.6, { info: true, scale: 0.8 });
+    this.drawPiece(field.nextPiece, infoX, 10.6, { info: true, scale: 0.8 });
 
     let banner = '';
     if (game.pause) banner = 'PAUSE';
     else if (field.isWinner) banner = 'WINNER';
+    else if (game.isDraw) banner = 'DRAW';
     texts.banner.set(banner);
     texts.banner.mesh.visible = board.bannerBack.visible = banner !== '';
   }

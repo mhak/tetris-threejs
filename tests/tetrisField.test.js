@@ -9,11 +9,10 @@ import { Block } from '../src/game/block.js';
 const fixedRandom = (value) => () => value;
 
 function fieldWith(kind) {
-  const f = new TetrisField(0, 0, { random: fixedRandom(0) });
+  const f = new TetrisField(0, { random: fixedRandom(0) });
   f.currentPiece = createTetromino(kind);
   f.resetPosition(f.currentPiece);
   f.currentPiece.posY = -1;
-  f.calculateShadowY();
   return f;
 }
 
@@ -65,7 +64,7 @@ test('left and right movement stops at the walls', () => {
 
 test('clearing four lines scores a tetris', () => {
   const played = [];
-  const f = new TetrisField(0, 0, { random: fixedRandom(0), sounds: { play: (n) => played.push(n) } });
+  const f = new TetrisField(0, { random: fixedRandom(0), sounds: { play: (n) => played.push(n) } });
   for (let y = Height - 4; y < Height; y++) f.field[y].fill(Block.J);
   assert.equal(f.clearLines(), 4);
   assert.equal(f.score, 1200);
@@ -75,7 +74,7 @@ test('clearing four lines scores a tetris', () => {
 });
 
 test('clearing a line with a power block collects it', () => {
-  const f = new TetrisField(0, 0, { random: fixedRandom(0) });
+  const f = new TetrisField(0, { random: fixedRandom(0) });
   f.field[Height - 1].fill(Block.J);
   f.field[Height - 1][2] = Block.Drop;
   f.clearLines();
@@ -83,7 +82,7 @@ test('clearing a line with a power block collects it', () => {
 });
 
 test('addLine pushes a garbage row with one hole', () => {
-  const f = new TetrisField(0, 0, { random: fixedRandom(0.35) });
+  const f = new TetrisField(0, { random: fixedRandom(0.35) });
   f.addLine();
   const row = f.field[Height - 1];
   assert.equal(row.filter((v) => v === 0).length, 1);
@@ -92,14 +91,14 @@ test('addLine pushes a garbage row with one hole', () => {
 });
 
 test('leftSlide packs every row to the left', () => {
-  const f = new TetrisField(0, 0, { random: fixedRandom(0) });
+  const f = new TetrisField(0, { random: fixedRandom(0) });
   f.field[Height - 1] = [0, 1, 0, 2, 0, 0, 3, 0, 0, 0];
   f.leftSlide();
   assert.deepEqual(f.field[Height - 1], [1, 2, 3, 0, 0, 0, 0, 0, 0, 0]);
 });
 
 test('spawnRandomPower does not hang when only power blocks remain', () => {
-  const f = new TetrisField(0, 0, { random: fixedRandom(0) });
+  const f = new TetrisField(0, { random: fixedRandom(0) });
   f.field[Height - 1][0] = Block.AddLine;
   f.spawnRandomPower();
   assert.equal(f.field[Height - 1][0], Block.AddLine);
@@ -154,4 +153,104 @@ test('held down key repeats after the key press delay', () => {
   assert.equal(p1.currentPiece.posX, startX - 1);
   for (let i = 0; i < 5; i++) game.update(16, left); // passes 150ms
   assert.equal(p1.currentPiece.posX, startX - 2);
+});
+
+test('a garbage line pushes a low piece up instead of ending the game', () => {
+  const f = fieldWith('O');
+  f.field[Height - 1].fill(Block.J);
+  f.field[Height - 1][0] = 0;
+  f.currentPiece.posY = Height - 3; // resting on the stack
+  f.addLine();
+  assert.equal(f.isCollision(f.currentPiece), false);
+  f.update(16);
+  assert.equal(f.isGameOver, false);
+});
+
+test('leftSlide under the falling piece does not end your game', () => {
+  const f = fieldWith('O');
+  f.currentPiece.posX = 0;
+  f.currentPiece.posY = 14;
+  for (let y = 14; y < Height; y++) f.field[y][9] = Block.J;
+  f.leftSlide();
+  f.update(16);
+  assert.equal(f.isGameOver, false);
+  assert.equal(f.isCollision(f.currentPiece), false);
+});
+
+test('a piece whose top matrix rows are empty can lock at the top', () => {
+  const f = fieldWith('I'); // filled cells are in matrix row 2
+  for (let y = 2; y < Height; y++) f.field[y].fill(Block.J);
+  for (let y = 2; y < Height; y++) f.field[y][9] = 0; // no full rows
+  f.movePieceDown(); // posY 0 collides, so it locks at -1 with cells in row 1
+  assert.equal(f.isGameOver, false);
+  assert.equal(f.field[1][3], Block.I);
+});
+
+test('locking with cells above the well is a game over', () => {
+  const f = fieldWith('T'); // filled cells in matrix rows 0-1
+  for (let y = 1; y < Height; y++) f.field[y].fill(Block.J);
+  for (let y = 1; y < Height; y++) f.field[y][0] = 0;
+  f.movePieceHardDrop();
+  assert.equal(f.isGameOver, true);
+});
+
+test('hold swaps the held piece in at the spawn row and spawn rotation', () => {
+  const f = fieldWith('T');
+  f.holdPiece();
+  f.canHoldPiece = true;
+  f.currentPiece.rotateRight();
+  f.currentPiece.posY = 10;
+  const second = f.currentPiece;
+  f.holdPiece();
+  assert.equal(f.currentPiece.kind, 'T');
+  assert.equal(f.currentPiece.posY, -1);
+  assert.equal(f.heldPiece, second);
+  assert.equal(second.orientation, 0);
+});
+
+test('the ghost piece is up to date after a line clear', () => {
+  const f = fieldWith('O');
+  f.field[Height - 1].fill(Block.J);
+  f.field[Height - 1][0] = 0;
+  f.field[Height - 1][1] = 0;
+  f.currentPiece.posX = 0;
+  f.movePieceHardDrop(); // completes the bottom row
+  f.clearLines();
+  // Next piece is a horizontal I (cells in matrix row 2) over an empty bottom
+  // row, so it lands at posY 17; before the clear it would have been 16.
+  assert.equal(f.currentPiece.kind, 'I');
+  assert.equal(f.shadowY, 17);
+});
+
+test('only cleared rows with powers are left out of the power counter', () => {
+  const f = new TetrisField(0, { random: fixedRandom(0) });
+  f.field[Height - 1].fill(Block.J);
+  f.field[1] = [Block.Drop, Block.AddLine, 0, 0, 0, 0, 0, 0, 0, 0];
+  f.clearLines();
+  assert.equal(f.powerIntervalCount, 1);
+
+  f.field[Height - 1].fill(Block.J);
+  f.field[Height - 1][4] = Block.Drop;
+  f.clearLines();
+  assert.equal(f.powerIntervalCount, 1);
+});
+
+test('when both players top out together, start restarts the game', () => {
+  const game = new GameScreen({ playerCount: 2, random: fixedRandom(0) });
+  game.players.forEach((p) => (p.isGameOver = true));
+  assert.equal(game.isDraw, true);
+  assert.equal(game.isFinished, true);
+  game.update(16, (j) => ({ ...emptyState(), start: j === 1 }));
+  assert.ok(game.players.every((p) => !p.isGameOver));
+});
+
+test('powers do not touch opponents that are already out', () => {
+  const game = new GameScreen({ playerCount: 2, random: fixedRandom(0) });
+  const [p1, p2] = game.players;
+  p2.isGameOver = true;
+  const before = JSON.stringify(p2.field);
+  p1.powers = [Block.AddLine, Block.Drop];
+  game.usePower(p1);
+  game.usePower(p1);
+  assert.equal(JSON.stringify(p2.field), before);
 });

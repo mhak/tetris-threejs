@@ -4,13 +4,13 @@ const BASE = import.meta.env.BASE_URL + 'assets/';
 const SFX = {
   gameOver: 'sfx/game-over.wav',
   impact: 'sfx/impact.wav',
-  clear: 'sfx/impactd.wav',
-  tetris: 'sfx/impactf.wav',
+  clear: 'sfx/impactd.mp3',
+  tetris: 'sfx/impactf.mp3',
   boom: 'sfx/boom.mp3',
 };
 
 const SONGS = [
-  'music/Arcade.wav',
+  'music/Arcade.mp3',
   'music/Better Days.mp3',
   'music/The Process.mp3',
   'music/zelda-lost-woods.mp3',
@@ -23,20 +23,42 @@ export class Audio {
     this.buffers = {};
     this.music = new window.Audio();
     this.music.volume = 0.5;
-    this.music.addEventListener('ended', () => this.playRandomSong());
-    this.music.addEventListener('error', () => {
-      this.musicFailed = true;
-    });
-    this.musicFailed = false;
     this.musicStarted = false;
+    // Browsers refuse playback until a user gesture; gamepad presses don't
+    // count, so a game started from a controller waits for a key or click.
+    this.blocked = false;
+    this.failures = 0;
+
+    this.music.addEventListener('ended', () => this.playRandomSong());
+    this.music.addEventListener('playing', () => {
+      this.failures = 0;
+    });
+    this.music.addEventListener('error', () => {
+      // Try another track; give up only once every track has failed in a row.
+      this.failures++;
+      this.musicStarted = false;
+      if (this.failures < SONGS.length) this.playRandomSong();
+    });
+
+    const onGesture = () => {
+      this.blocked = false;
+      if (this.ctx?.state === 'suspended') this.ctx.resume().catch(() => {});
+    };
+    window.addEventListener('keydown', onGesture);
+    window.addEventListener('pointerdown', onGesture);
   }
 
-  /** Must be called from a user gesture so browsers allow playback. */
+  get musicDisabled() {
+    return this.failures >= SONGS.length;
+  }
+
+  /** Call when the game starts; loads the sound effects. */
   async unlock() {
     if (this.ctx) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
     this.ctx = new Ctx();
+    this.ctx.resume().catch(() => {});
     await Promise.all(
       Object.entries(SFX).map(async ([name, path]) => {
         try {
@@ -51,7 +73,7 @@ export class Audio {
 
   play(name, volume = 1) {
     const buffer = this.buffers[name];
-    if (!this.ctx || !buffer) return;
+    if (!this.ctx || !buffer || this.ctx.state !== 'running') return;
     const source = this.ctx.createBufferSource();
     const gain = this.ctx.createGain();
     gain.gain.value = volume;
@@ -64,14 +86,20 @@ export class Audio {
     const song = SONGS[Math.floor(Math.random() * SONGS.length)];
     this.music.src = BASE + encodeURI(song);
     this.musicStarted = true;
-    this.music.play().catch(() => {});
+    this.resumeMusic();
+  }
+
+  resumeMusic() {
+    this.music.play().catch((err) => {
+      if (err?.name === 'NotAllowedError') this.blocked = true;
+    });
   }
 
   /** Mirrors the MediaPlayer handling at the top of GameScreen.Update. */
   update({ paused, stopped }) {
-    if (!this.ctx || this.musicFailed) return;
+    if (!this.ctx || this.musicDisabled) return;
     if (stopped) {
-      if (!this.music.paused) {
+      if (this.musicStarted) {
         this.music.pause();
         this.musicStarted = false;
       }
@@ -79,8 +107,8 @@ export class Audio {
     }
     if (paused) {
       if (!this.music.paused) this.music.pause();
-    } else if (this.music.paused) {
-      if (this.musicStarted) this.music.play().catch(() => {});
+    } else if (this.music.paused && !this.blocked) {
+      if (this.musicStarted) this.resumeMusic();
       else this.playRandomSong();
     }
   }

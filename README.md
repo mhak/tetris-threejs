@@ -37,8 +37,21 @@ Intentional differences:
 
 - Keyboard controls were added for both players (gamepads still work).
 - A start screen is shown first, because browsers only allow audio after a user gesture.
-- `SpawnRandomPower` picks from the valid cells directly instead of re-rolling
-  random cells, so it can't hang when no normal block is left.
+  If you start with a controller, sound begins after the first key press or click.
+- Bugs from the original were fixed:
+  - A garbage line, or your own Clear Line / Left Slide power, no longer ends the
+    game when it shifts blocks under the falling piece; the piece is pushed up instead.
+  - Game over happens only when a piece locks with cells above the well (or a new
+    piece can't spawn), not whenever a piece's empty top rows stick out.
+  - A piece swapped in from hold spawns at the normal spawn row, and held pieces
+    return to their spawn rotation.
+  - The ghost piece is always up to date (it used to float too high after a line clear).
+  - The power counter counts cleared rows correctly, so a power spawns every
+    4 cleared lines (rows that paid out a power don't count).
+  - If both players top out in the same frame the round is a draw and Start restarts it.
+  - Powers no longer affect players who are already out.
+  - `SpawnRandomPower` picks from the valid cells directly, so it can't hang.
+- `Arcade.wav` and the two line-clear sounds were re-encoded as MP3 (19 MB to 2.6 MB).
 
 ## Controls
 

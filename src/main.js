@@ -41,7 +41,7 @@ function frame(now) {
 
   if (game) {
     game.update(dt, (i) => input.getState(i));
-    audio.update({ paused: game.pause, stopped: game.hasWinner });
+    audio.update({ paused: game.pause, stopped: game.isFinished });
     renderer.draw(game, dt);
   } else {
     renderer.draw(idle, dt);

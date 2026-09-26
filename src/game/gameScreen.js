@@ -21,15 +21,37 @@ export class GameScreen {
   }
 
   createField(i) {
-    return new TetrisField(i, 0, { sounds: this.sounds, random: this.random });
+    return new TetrisField(i, { sounds: this.sounds, random: this.random });
   }
 
   get hasWinner() {
     return this.players.some((p) => p.isWinner);
   }
 
+  /** Every player topped out (e.g. both in the same frame), so nobody won. */
+  get isDraw() {
+    return this.players.every((p) => p.isGameOver);
+  }
+
+  get isFinished() {
+    return this.hasWinner || this.isDraw;
+  }
+
+  opponentsOf(playerField) {
+    return this.players.filter((p) => p !== playerField && !p.isGameOver);
+  }
+
   /** @param getState (playerIndex) => virtual pad state */
   update(elapsedMs, getState) {
+    if (this.isDraw) {
+      // Game-over players are skipped below, so handle restart here.
+      const states = this.players.map((_, i) => getState(i));
+      const restart = states.some((s, i) => s.start && !this.oldStates[i].start);
+      this.oldStates = states;
+      if (restart) this.restartGame();
+      return;
+    }
+
     for (let i = 0; i < this.players.length; i++) {
       const playerField = this.players[i];
       if (playerField.isGameOver) continue;
@@ -43,10 +65,7 @@ export class GameScreen {
       const lines = playerField.update(elapsedMs);
 
       if (lines === 4) {
-        for (const player of this.players) {
-          if (player.playerNum === playerField.playerNum) continue;
-          player.addLine();
-        }
+        for (const player of this.opponentsOf(playerField)) player.addLine();
         this.onTetris?.(playerField);
       }
     }
@@ -124,30 +143,24 @@ export class GameScreen {
     const power = playerField.powers.shift();
 
     if (power === Block.AddLine) {
-      for (const player of this.players) {
-        if (player.playerNum === playerField.playerNum) continue;
-        player.addLine();
-      }
+      for (const player of this.opponentsOf(playerField)) player.addLine();
       return;
     }
 
     if (power === Block.ClearLine) {
-      this.players[playerField.playerNum].clearLine();
+      playerField.clearLine();
       return;
     }
 
     if (power === Block.Drop) {
-      for (const player of this.players) {
-        if (player.playerNum === playerField.playerNum) continue;
-        player.movePieceHardDrop();
-      }
+      for (const player of this.opponentsOf(playerField)) player.movePieceHardDrop();
       this.sounds?.play('boom', 0.5);
       this.onBoom?.(playerField);
       return;
     }
 
     if (power === Block.LeftSlide) {
-      this.players[playerField.playerNum].leftSlide();
+      playerField.leftSlide();
     }
   }
 

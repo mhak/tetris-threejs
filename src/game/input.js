@@ -46,12 +46,18 @@ export class Input {
     this.onAnyInput = null;
     const gameKeys = new Set(KEYBOARD_LAYOUTS.flatMap((l) => Object.values(l).flat()));
     target.addEventListener('keydown', (e) => {
+      // Leave browser shortcuts (Ctrl/Cmd/Alt + key) alone and out of the game.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (gameKeys.has(e.code)) e.preventDefault();
       this.keys.add(e.code);
       this.tapped.add(e.code);
       this.onAnyInput?.();
     });
-    target.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    target.addEventListener('keyup', (e) => {
+      // macOS doesn't send keyup for keys released while Cmd was held.
+      if (e.key === 'Meta') this.keys.clear();
+      else this.keys.delete(e.code);
+    });
     target.addEventListener('blur', () => this.keys.clear());
   }
 
@@ -69,7 +75,7 @@ export class Input {
       }
     }
 
-    const pad = getPads()[playerIndex];
+    const pad = getPads()[playerIndex]; // by slot, so pads keep their player
     if (pad) {
       for (const [button, idx] of Object.entries(PAD_BUTTONS)) {
         if (pad.buttons[idx]?.pressed) state[button] = true;
@@ -84,11 +90,12 @@ export class Input {
   }
 
   anyPadButtonPressed() {
-    return getPads().some((p) => p.buttons.some((b) => b.pressed));
+    return getPads().some((p) => p?.buttons.some((b) => b.pressed));
   }
 }
 
 function getPads() {
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return [];
-  return Array.from(navigator.getGamepads()).filter(Boolean);
+  // Keep empty slots: filtering them would shift pad 1 to player 1 on a disconnect.
+  return Array.from(navigator.getGamepads());
 }

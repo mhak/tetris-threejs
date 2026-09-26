@@ -22,9 +22,8 @@ const emptyRow = () => new Array(Width).fill(0);
 const silent = { play() {} };
 
 export class TetrisField {
-  constructor(playerNum = 0, deaths = 0, { sounds = silent, random = Math.random } = {}) {
+  constructor(playerNum = 0, { sounds = silent, random = Math.random } = {}) {
     this.playerNum = playerNum;
-    this.deaths = deaths;
     this.sounds = sounds;
     this.random = random;
 
@@ -36,14 +35,12 @@ export class TetrisField {
     this.keyPressDelay = 150;
     this.score = 0;
     this.lines = 0;
-    this.linesToAdd = 0;
     this.powerInterval = 4;
     this.powerIntervalCount = 0;
     this.powerList = [Block.AddLine, Block.ClearLine, Block.Drop, Block.LeftSlide];
     this.powers = [];
     this.powersMax = 5;
     this.disablePowerCollect = false;
-    this.shadowY = 0;
     this.canHoldPiece = true;
 
     this.currentPiece = null;
@@ -64,16 +61,21 @@ export class TetrisField {
     this.currentPiece = this.nextPiece;
     this.nextPiece = this.generatePiece();
     this.disablePowerCollect = false;
-    this.currentPiece.posY = -1;
-    this.calculateShadowY();
+    this.spawn(this.currentPiece);
   }
 
-  calculateShadowY() {
-    let y = this.currentPiece.posY > 0 ? this.currentPiece.posY + 1 : 1;
-    while (!this.isCollision(this.currentPiece, y)) {
-      y++;
-    }
-    this.shadowY = y - 1;
+  /** Places a piece at the spawn row; the next update() ends the game if it doesn't fit. */
+  spawn(piece) {
+    piece.posX = Width / 2 - 2;
+    piece.posY = -1;
+  }
+
+  /** Row the current piece would land on. Computed on demand so it can't go stale. */
+  get shadowY() {
+    const piece = this.currentPiece;
+    let y = piece.posY;
+    while (!this.isCollision(piece, y + 1)) y++;
+    return y;
   }
 
   generatePiece() {
@@ -90,14 +92,15 @@ export class TetrisField {
   holdPiece() {
     if (!this.canHoldPiece) return;
 
+    const held = this.resetPosition(this.currentPiece);
+    held.resetRotation();
     if (this.heldPiece == null) {
-      this.heldPiece = this.resetPosition(this.currentPiece);
+      this.heldPiece = held;
       this.activatePiece();
     } else {
-      const temp = this.heldPiece;
-      this.heldPiece = this.resetPosition(this.currentPiece);
-      this.currentPiece = temp;
-      this.calculateShadowY();
+      this.currentPiece = this.heldPiece;
+      this.heldPiece = held;
+      this.spawn(this.currentPiece);
     }
 
     this.canHoldPiece = false;
@@ -105,11 +108,8 @@ export class TetrisField {
 
   /** Advances the field by `elapsedMs`; returns the number of lines cleared. */
   update(elapsedMs) {
-    while (this.linesToAdd > 0) {
-      this.addLine();
-      this.linesToAdd--;
-    }
-
+    // Only a spawn (or held piece) that doesn't fit can overlap here: every
+    // other field change runs settlePiece() to push the piece clear.
     if (this.isCollision(this.currentPiece)) {
       this.setGameOver();
       return 0;
@@ -130,7 +130,6 @@ export class TetrisField {
     if (this.isCollision(this.currentPiece)) {
       this.currentPiece.posX++;
     }
-    this.calculateShadowY();
   }
 
   movePieceRight() {
@@ -138,7 +137,6 @@ export class TetrisField {
     if (this.isCollision(this.currentPiece)) {
       this.currentPiece.posX--;
     }
-    this.calculateShadowY();
   }
 
   movePieceDown() {
@@ -146,11 +144,7 @@ export class TetrisField {
 
     if (this.isCollision(this.currentPiece)) {
       this.currentPiece.posY--;
-      if (this.currentPiece.posY < 0) {
-        this.setGameOver();
-        return;
-      }
-      this.handlePieceImpact();
+      this.lockPiece();
     }
   }
 
@@ -166,7 +160,6 @@ export class TetrisField {
         this.currentPiece.rotateRight();
       }
     }
-    this.calculateShadowY();
   }
 
   rotatePieceRight() {
@@ -176,7 +169,6 @@ export class TetrisField {
         this.currentPiece.rotateLeft();
       }
     }
-    this.calculateShadowY();
   }
 
   movePieceHardDrop() {
@@ -184,11 +176,32 @@ export class TetrisField {
       this.currentPiece.posY++;
     } while (!this.isCollision(this.currentPiece));
     this.currentPiece.posY--;
-    if (this.currentPiece.posY < 0) {
+    this.lockPiece();
+  }
+
+  /** Locks the landed piece, or ends the game if part of it is above the well. */
+  lockPiece() {
+    if (this.isAboveField(this.currentPiece)) {
       this.setGameOver();
       return;
     }
     this.handlePieceImpact();
+  }
+
+  isAboveField(piece) {
+    return piece.shape.some((row, y) => y + piece.posY < 0 && row.some((v) => v !== 0));
+  }
+
+  /**
+   * After the field changed under the falling piece (garbage line, powers),
+   * push the piece up until it no longer overlaps instead of ending the game.
+   */
+  settlePiece() {
+    const piece = this.currentPiece;
+    if (!piece) return;
+    while (this.isCollision(piece) && piece.posY > -piece.shape.length) {
+      piece.posY--;
+    }
   }
 
   handlePieceImpact() {
@@ -258,9 +271,9 @@ export class TetrisField {
 
   clearLines() {
     let lines = 0;
+    let linesWithPowers = 0;
     const powersToAdd = [];
-    // Row 0 is never checked, matching the original loop bounds.
-    for (let y = Height - 1; y > 0; y--) {
+    for (let y = Height - 1; y >= 0; y--) {
       powersToAdd.length = 0;
       for (let x = 0; x < Width; x++) {
         const val = this.field[y][x];
@@ -272,6 +285,7 @@ export class TetrisField {
         if (x === Width - 1) {
           this.field.splice(y, 1);
           lines++;
+          if (powersToAdd.length > 0) linesWithPowers++;
           if (this.powers.length < this.powersMax) {
             this.powers.push(...powersToAdd.slice(0, this.powersMax - this.powers.length));
           }
@@ -284,7 +298,8 @@ export class TetrisField {
       this.field.unshift(emptyRow());
     }
     this.lines += lines;
-    this.powerIntervalCount += lines - powersToAdd.length;
+    // Rows that paid out a power don't count towards spawning the next one.
+    this.powerIntervalCount += lines - linesWithPowers;
     while (this.powerIntervalCount >= this.powerInterval) {
       this.spawnRandomPower();
       this.powerIntervalCount -= this.powerInterval;
@@ -340,23 +355,15 @@ export class TetrisField {
     }
     this.field.push(line);
     this.field.shift();
+    this.settlePiece();
   }
 
   clearLine() {
-    this.field.splice(19, 1);
+    this.field.splice(Height - 1, 1);
     this.field.unshift(emptyRow());
+    this.settlePiece();
   }
 
-  gravity() {
-    this.disablePowerCollect = true;
-    for (let x = 0; x < Width; x++) {
-      let count = Height - 1;
-      for (let y = Height - 1; y > 0; y--) {
-        if (this.field[y][x] !== 0) this.field[count--][x] = this.field[y][x];
-      }
-      while (count > 0) this.field[count--][x] = 0;
-    }
-  }
 
   leftSlide() {
     this.disablePowerCollect = true;
@@ -367,6 +374,7 @@ export class TetrisField {
       }
       while (count < Width) this.field[y][count++] = 0;
     }
+    this.settlePiece();
   }
   // #endregion powers
 }
