@@ -14,6 +14,8 @@ import { isValidCode, normalizeCode } from './net/joinCode.js';
 const PLAYER_COUNT = 1;
 // const PLAYER_COUNT = 2;
 const MAX_FRAME_MS = 100;
+// Online: our board full size, the opponent's as a mini board.
+const ONLINE_BOARDS = [{}, { mini: true }];
 
 // Show touch UI on phones/tablets, or as soon as the screen is touched.
 const setTouch = () => document.body.classList.add('touch');
@@ -78,6 +80,7 @@ function addEffects(g, r = renderer) {
   g.onHardDrop = () => r.addShake(0.25);
   g.onTetris = () => r.addShake(0.9);
   g.onBoom = () => r.addShake(1.4);
+  g.onHit = () => r.flash(0, 'hit');
 }
 
 function start() {
@@ -139,6 +142,7 @@ async function startSession(role, { name = lobby.name, code = null } = {}) {
 function openSession(s) {
   session = s;
   addEffects(s.game);
+  s.onAttackSent = () => renderer.flash(1, 'attack');
   s.onChange = () => s === session && updateSession();
   s.open();
 }
@@ -157,8 +161,9 @@ async function startLoopback() {
   openSession(host);
   await host.open();
   const guest = new Session({ role: 'guest', name: 'GUEST', code: host.code, transport: new LoopbackTransport(network) });
-  debugGuest = { session: guest, renderer: new Renderer(document.getElementById('debug-right'), 2) };
+  debugGuest = { session: guest, renderer: new Renderer(document.getElementById('debug-right'), ONLINE_BOARDS) };
   addEffects(guest.game, debugGuest.renderer);
+  guest.onAttackSent = () => debugGuest.renderer.flash(1, 'attack');
   window.debugSessions = { host, guest }; // for poking at from the console
   guest.open();
 }
@@ -180,7 +185,7 @@ function updateSession() {
 function enterRoom(s) {
   lobby.close();
   overlay.classList.add('hidden');
-  renderer.setBoards(2);
+  renderer.setBoards(ONLINE_BOARDS);
   if (s.role === 'guest') dropJoinParam();
   // Don't let the tap or key that joined count as a fresh press.
   s.game.oldStates[0] = getState(0);
