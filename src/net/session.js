@@ -3,7 +3,7 @@
 //   idle -> hosting -> waiting -> countdown -> playing -> roundOver -> countdown ...
 //   idle -> joining -> countdown
 //   countdown | playing <-> paused
-//   countdown | playing | paused | roundOver -> reconnecting -> (countdown | roundOver | closed)
+//   countdown | playing | paused | roundOver -> reconnecting -> (countdown | paused | roundOver | closed)
 //   any -> closed (bye, cancel, fatal error, grace period over)
 //
 // Each device runs the rules for its own board only and sends the other one
@@ -131,20 +131,21 @@ export class Session {
     this.latency = null;
     this.pingTimer = 0;
     this.graceDeadline = 0;
-    this.resumeTo = 'countdown';
+    this.wasPaused = false; // the room was paused when the connection went
     this.reconnecting = false;
     this.wake = null;
-    // Went to the background (sent or got pause with reason 'hidden'), with no resume since.
-    this.localAway = false;
-    this.remoteAway = false;
+    // When our page went to the background, or null while it is visible.
     this.hiddenAt = null;
+    // The other side said it went to the background (pause with reason
+    // 'hidden') and hasn't said it's back since.
+    this.remoteAway = false;
 
     // Player 0 is our board, player 1 mirrors the opponent's snapshots.
     this.game = new GameScreen({ online: true, sounds });
     this.game.onAttack = (kind) => this.sendAttack(kind);
     this.game.onOver = () => this.localOver();
     this.game.onStartPressed = () => this.pressStart();
-    this.lastSnapshot = '';
+    this.lastSnapshot = ''; // cheap signature of the last snapshot sent
     this.lastSnapshotAt = -Infinity;
     this.onChange = () => {};
     this.onAttackSent = () => {};
@@ -218,6 +219,11 @@ export class Session {
     return [this.wins[this.role], this.wins[this.other]];
   }
 
+  /** Our page is in the background. */
+  get localAway() {
+    return this.hiddenAt !== null;
+  }
+
   /** Whole seconds left before a lost connection ends the room. */
   get graceLeft() {
     return Math.max(0, Math.ceil((this.graceDeadline - this.clock.now()) / 1000));
@@ -256,6 +262,7 @@ export class Session {
     this.transport.send(message);
   }
 
+  /** Keeps the room for a reload. Also called on pagehide, so lastSeen is fresh. */
   save() {
     if (!this.storage || !this.token || this.remoteName === null || this.round < 1) return;
     this.storage.save({
@@ -395,7 +402,6 @@ export class Session {
     this.firstOver = null;
     this.cancel(this.overTimer);
     // Both pressed ready (or joined) for this round, so both are here.
-    this.localAway = false;
     this.remoteAway = false;
     this.game.startRound(round, seed, countdownMs);
     this.lastSnapshot = '';
@@ -411,15 +417,19 @@ export class Session {
     if (this.connected) this.sendSnapshot();
   }
 
+  /** Sends our board when it changed, at most every SNAPSHOT_MS. */
   sendSnapshot() {
     const now = this.clock.now();
     if (now - this.lastSnapshotAt < SNAPSHOT_MS) return;
-    const snapshot = snapshotOf(this.game.players[0], this.round);
-    const key = JSON.stringify(snapshot);
+    // A short signature instead of encoding the whole board every frame:
+    // field.revision changes whenever a cell does.
+    const f = this.game.players[0];
+    const p = f.currentPiece;
+    const key = `${this.round}|${f.revision}|${p?.kind}${p?.orientation},${p?.posX},${p?.posY}|${f.powers}|${f.score}|${f.lines}|${f.isGameOver}`;
     if (key === this.lastSnapshot) return;
     this.lastSnapshot = key;
     this.lastSnapshotAt = now;
-    this.send(snapshot);
+    this.send(snapshotOf(f, this.round));
   }
 
   sendAttack(kind) {
@@ -463,15 +473,20 @@ export class Session {
     if (round !== this.round || this.result || !WINNERS.includes(winner)) return;
     this.result = winner;
     if (winner !== 'draw') this.wins[winner]++;
-    this.game.result = winner === 'draw' ? 'draw' : winner === this.role ? 0 : 1;
+    this.game.result = this.gameResult(winner);
     this.save();
     if (this.state === 'reconnecting') {
-      this.resumeTo = 'roundOver';
-      this.onChange();
+      this.onChange(); // carryOn() shows it once the other side is back
     } else {
       this.game.pause = false;
       this.setState('roundOver');
     }
+  }
+
+  /** A winner as GameScreen.result sees it: our board is 0, theirs 1. */
+  gameResult(winner) {
+    if (winner === 'draw') return 'draw';
+    return winner === this.role ? 0 : 1;
   }
 
   /** Ready for a rematch. The host starts the next round once both are. */
@@ -486,6 +501,7 @@ export class Session {
   receiveReady(msg) {
     if (msg.round !== this.round || !this.result) return;
     this.ready[this.other] = true;
+    this.remoteAway = false; // they pressed it, so they're here
     this.onChange();
     this.maybeStartNext();
   }
@@ -514,7 +530,6 @@ export class Session {
 
   resume() {
     if (this.state !== 'paused') return;
-    this.localAway = false;
     this.send({ t: MSG.resume });
     this.beginCountdown();
   }
@@ -531,8 +546,9 @@ export class Session {
     this.setState('countdown');
   }
 
+  /** A plain pause also means "I'm here": a page back from the background sends one. */
   receivePause(msg) {
-    if (msg.reason === 'hidden') this.remoteAway = true;
+    this.remoteAway = msg.reason === 'hidden';
     if (this.state === 'countdown' || this.state === 'playing') this.pauseBoth();
   }
 
@@ -548,18 +564,22 @@ export class Session {
   setHidden(hidden) {
     if (hidden) {
       this.hiddenAt = this.clock.now();
+      this.save(); // a reload or a killed tab may come next
       this.goneAway();
-    } else {
-      this.hiddenAt = null;
-      // A long suspension shows up as a stale connection: notice it now.
-      if (this.pingTimer) this.tick();
+      return;
     }
+    // A long suspension shows up as a stale connection. Check while we still
+    // count as away: a grace period that ran out meanwhile is ours to lose.
+    if (this.pingTimer) this.tick();
+    this.hiddenAt = null;
+    // Tell the other side we're back: a pause without the 'hidden' reason.
+    if (this.connected && (this.state === 'paused' || this.state === 'roundOver')) this.send({ t: MSG.pause });
   }
 
+  /** In the background: pause both and say why. */
   goneAway() {
     if (!this.connected || !IN_ROOM.includes(this.state) || this.state === 'reconnecting') return;
     if (this.state === 'countdown' || this.state === 'playing') this.pauseBoth();
-    this.localAway = true;
     this.send({ t: MSG.pause, reason: 'hidden' });
   }
 
@@ -575,7 +595,6 @@ export class Session {
         this.connectionLost();
       } else {
         this.send({ t: MSG.ping, ts: now });
-        this.save();
       }
     }
     if (this.state === 'reconnecting') {
@@ -609,8 +628,8 @@ export class Session {
   /** Freezes the room until the other side is back. */
   suspend() {
     if (this.state === 'reconnecting') return;
-    this.resumeTo = this.state === 'roundOver' ? 'roundOver' : 'countdown';
-    if (this.resumeTo === 'countdown') this.game.pause = true;
+    this.wasPaused = this.state === 'paused';
+    if (this.state !== 'roundOver') this.game.pause = true;
   }
 
   /** Guest: connect to the host's code again until it answers or the grace period ends. */
@@ -651,6 +670,7 @@ export class Session {
       winner: this.result,
       ready: this.ready.host,
       wins: this.wins,
+      paused: this.wasPaused,
     });
     this.markConnected();
     this.carryOn();
@@ -667,12 +687,16 @@ export class Session {
     if (this.result && msg.ready === true) this.ready.host = true;
     this.wins = { host: count(msg.wins?.host), guest: count(msg.wins?.guest) };
     this.markConnected();
-    this.carryOn();
+    this.carryOn(msg.paused === true);
   }
 
-  /** Back after a reconnect: resume the round with a countdown, or the result screen. */
-  carryOn() {
-    this.localAway = false;
+  /**
+   * Back after a reconnect: the result screen, the pause either side was in,
+   * or the round again after a countdown.
+   * @param hostPaused guest only: the host's room was paused (from sync)
+   */
+  carryOn(hostPaused = false) {
+    // A side that is still in the background says so again below.
     this.remoteAway = false;
     this.lastSnapshot = '';
     if (this.result) {
@@ -680,11 +704,16 @@ export class Session {
       this.setState('roundOver');
       if (this.ready[this.role]) this.send({ t: MSG.ready, round: this.round });
       this.maybeStartNext();
-      return;
+    } else if (this.wasPaused || hostPaused) {
+      this.pauseBoth();
+      // The host only knows its own pause; bring it along.
+      if (this.wasPaused && !hostPaused) this.send({ t: MSG.pause });
+    } else {
+      this.beginCountdown();
     }
-    this.beginCountdown();
     // Topped out before the connection went (or lost the round to a reload): say so again.
-    if (this.game.players[0].isGameOver) this.localOver();
+    if (!this.result && this.game.players[0].isGameOver) this.localOver();
+    if (this.localAway) this.goneAway();
   }
 
   /** The grace period ran out. Each side decides the outcome on its own. */
@@ -700,12 +729,11 @@ export class Session {
     const game = this.game;
     game.names = this.names;
     game.startRound(this.round, this.seed, 0);
+    this.wasPaused = false;
     if (this.result) {
-      game.result = this.result === 'draw' ? 'draw' : this.result === this.role ? 0 : 1;
-      this.resumeTo = 'roundOver';
+      game.result = this.gameResult(this.result);
     } else {
       game.players[0].isGameOver = true;
-      this.resumeTo = 'countdown';
       game.pause = true;
     }
     this.graceDeadline = this.clock.now() + GRACE_MS;
@@ -763,7 +791,10 @@ export class Session {
         this.send({ t: MSG.pong, ts: msg.ts });
         return;
       case MSG.pong:
-        if (Number.isFinite(msg.ts)) this.latency = this.clock.now() - msg.ts;
+        // Round trip, shown next to the win counter.
+        if (!Number.isFinite(msg.ts)) return;
+        this.latency = this.clock.now() - msg.ts;
+        this.onChange();
         return;
       case MSG.bye:
         this.closeReason = 'bye';

@@ -268,8 +268,9 @@ body.touch .controls.touch-only { display: grid !important; }
 
 /* Online match: win counter above the game, status panel over it. */
 #match-bar {
+  position: relative;
   flex: none;
-  padding: 6px 12px;
+  padding: 6px 64px; /* room for the latency on the right, kept even so the score stays centred */
   text-align: center;
   font-size: 11px;
   letter-spacing: 1px;
@@ -313,4 +314,12 @@ body.touch .controls.touch-only { display: grid !important; }
   color: var(--accent);
   background: rgba(0, 0, 0, 0.75);
   border: 2px solid var(--frame);
+}
+
+#match-ping {
+  position: absolute;
+  right: 12px;
+  font-size: 8px;
+  line-height: 11px;
+  color: var(--muted);
 }

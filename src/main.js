@@ -5,10 +5,11 @@ import { Input } from './game/input.js';
 import { Renderer } from './render/renderer.js';
 import { FONT } from './render/textPlane.js';
 import { TouchControls } from './touch.js';
-import { Lobby } from './ui/lobby.js';
+import { ERROR_TEXT, Lobby } from './ui/lobby.js';
 import { MatchHud } from './ui/matchHud.js';
 import { Session, roomStorage } from './net/session.js';
 import { isValidCode, normalizeCode } from './net/joinCode.js';
+import { saveName } from './net/playerName.js';
 
 // 2-player versus on one device is disabled for now; it will be added back later.
 // To re-enable it, switch these lines (and uncomment the P2 controls in index.html).
@@ -45,6 +46,9 @@ const joinParam = normalizeCode(params.get('join'));
 
 let game = null; // solo game
 let session = null; // online room
+// Set while PeerJS loads for a new session; a second request, Cancel or Leave
+// replaces or clears it, so a late load can tell it is no longer wanted.
+let opening = null;
 let inRoom = false; // the online game is on screen (from the first countdown until Back to start)
 let debugGuest = null; // ?debug=loopback: { session, renderer } for the right half
 let last = performance.now();
@@ -88,7 +92,7 @@ function addEffects(g, r = renderer) {
 
 /** The start screen is busy with something other than "press any key". */
 function menuBusy() {
-  return lobby.isOpen || !rejoinPanel.hidden || !!session;
+  return lobby.isOpen || !rejoinPanel.hidden || !!session || !!opening;
 }
 
 function start() {
@@ -132,7 +136,7 @@ for (const [id, mode] of [['create-room', 'create'], ['join-room', 'join']]) {
   });
 }
 
-lobby.onJoin = (name, code) => startSession('guest', { name, code });
+lobby.onJoin = (name, code) => startSession('guest', { code });
 // The host can still change its name while it waits; it is sent when the guest arrives.
 lobby.onNameChange = (name) => session?.setLocalName(name);
 lobby.onCancel = () => {
@@ -145,23 +149,49 @@ async function newTransport() {
   return new PeerTransport();
 }
 
-async function startSession(role, { name = lobby.name, code = null } = {}) {
-  endSession();
-  audio.unlock();
-  const transport = await newTransport();
-  if (!lobby.isOpen) return; // cancelled while loading
-  openSession(new Session({ role, name, code, sounds: audio, storage, transport }));
+/**
+ * Loads PeerJS, then returns a transport, or null if this request was
+ * cancelled or replaced meanwhile. Throws if the download failed.
+ */
+async function loadTransport() {
+  const ticket = {};
+  opening = ticket;
+  try {
+    const transport = await newTransport();
+    return opening === ticket ? transport : null;
+  } finally {
+    if (opening === ticket) opening = null;
+  }
 }
 
+async function startSession(role, { code = null } = {}) {
+  endSession();
+  audio.unlock();
+  lobby.setBusy(true); // no second join while PeerJS loads
+  let transport;
+  try {
+    transport = await loadTransport();
+  } catch {
+    lobby.setBusy(false);
+    lobby.showError('load');
+    return;
+  }
+  if (!transport) return; // cancelled or replaced while loading
+  // The name as it is now: the host may have edited it while PeerJS loaded.
+  openSession(new Session({ role, name: lobby.name, code, sounds: audio, storage, transport }));
+}
+
+/** Makes `s` the current session and opens it; resolves when open() does. */
 function openSession(s) {
   session = s;
   addEffects(s.game);
   s.onAttackSent = () => renderer.flash(1, 'attack');
   s.onChange = () => s === session && updateSession();
-  s.open();
+  return s.open();
 }
 
 function endSession() {
+  opening = null;
   // Forget it first: leaving fires one last onChange.
   const s = session;
   session = null;
@@ -169,13 +199,14 @@ function endSession() {
 }
 
 async function startLoopback() {
+  opening = {}; // start() must not run again while this sets up
   overlay.classList.add('hidden');
   audio.unlock();
   const { LoopbackNetwork, LoopbackTransport } = await import('./net/transport.js');
   const network = new LoopbackNetwork({ latencyMs: Number(params.get('latency') ?? 40) });
   const host = new Session({ role: 'host', name: 'HOST', sounds: audio, transport: new LoopbackTransport(network) });
-  openSession(host);
-  await host.open();
+  opening = null;
+  await openSession(host); // registers the room and picks its code
   const guest = new Session({ role: 'guest', name: 'GUEST', code: host.code, transport: new LoopbackTransport(network) });
   debugGuest = { session: guest, renderer: new Renderer(document.getElementById('debug-right'), ONLINE_BOARDS) };
   addEffects(guest.game, debugGuest.renderer);
@@ -189,9 +220,8 @@ function updateSession() {
   const s = session;
   if (s.inRoom && !inRoom) enterRoom(s);
   if (inRoom) {
-    // Leaving on purpose goes straight back; anything else shows why the room ended.
-    if (s.state === 'closed' && s.closeReason === 'left') leaveRoom();
-    else hud.render(s);
+    // Also after the room ends, to show why (Leave goes through leaveRoom instead).
+    hud.render(s);
     return;
   }
   updateLobby(s);
@@ -204,6 +234,8 @@ function enterRoom(s) {
   overlay.classList.add('hidden');
   renderer.setBoards(ONLINE_BOARDS);
   if (s.role === 'guest') dropJoinParam();
+  // Remember the name that was actually sent (the host may have edited it while waiting).
+  saveName(s.localName);
   if (!s.restored) hud.toast(s.isHost ? `${s.names[1]} JOINED` : `JOINED ${s.names[1]}`);
   // Don't let the tap or key that joined count as a fresh press.
   s.game.oldStates[0] = getState(0);
@@ -270,16 +302,31 @@ function dropJoinParam() {
 function offerRejoin(saved) {
   menu.hidden = true;
   rejoinPanel.hidden = false;
-  document.getElementById('rejoin-text').textContent = `ROOM ${saved.code} WITH ${saved.names[1]}`;
+  const text = document.getElementById('rejoin-text');
+  text.textContent = `ROOM ${saved.code} WITH ${saved.names[1]}`;
   document.getElementById('rejoin-go').onclick = async (e) => {
     e.stopPropagation();
+    const button = e.currentTarget;
+    if (button.disabled) return; // one rejoin per saved room, however many taps
+    button.disabled = true;
     audio.unlock();
-    const s = Session.restore(saved, { sounds: audio, storage, transport: await newTransport() });
+    let transport;
+    try {
+      transport = await loadTransport();
+    } catch {
+      button.disabled = false;
+      text.textContent = ERROR_TEXT.load;
+      text.dataset.tone = 'error';
+      return;
+    }
+    if (!transport) return; // left while loading
+    const s = Session.restore(saved, { sounds: audio, storage, transport });
     if (!s) return showMenu();
     openSession(s);
   };
   document.getElementById('rejoin-leave').onclick = (e) => {
     e.stopPropagation();
+    opening = null;
     storage.clear();
     showMenu();
   };
@@ -289,6 +336,9 @@ function offerRejoin(saved) {
 const saved = storage.load();
 if (!DEBUG_LOOPBACK && Session.canRestore(saved)) offerRejoin(saved);
 else if (isValidCode(joinParam)) openLobby('join', joinParam, true);
+
+// Keep the room's lastSeen fresh for a reload (it isn't written every second).
+window.addEventListener('pagehide', () => session?.save());
 
 // Pause when the tab or app goes to the background (e.g. a phone call).
 // Online this pauses both players.

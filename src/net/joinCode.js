@@ -33,6 +33,16 @@ export function normalizeCode(input) {
   return code;
 }
 
+/**
+ * Typed or pasted input to a code: a pasted join link gives its ?join= code,
+ * anything else goes through normalizeCode (so "k7q-x3" becomes "K7QX3").
+ */
+export function codeFromInput(input) {
+  const text = String(input ?? '');
+  const link = /[?&]join=([^&#\s]*)/i.exec(text);
+  return normalizeCode(link ? link[1] : text);
+}
+
 export function isValidCode(code) {
   return typeof code === 'string' && code.length === CODE_LENGTH && normalizeCode(code) === code;
 }

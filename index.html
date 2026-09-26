@@ -18,7 +18,7 @@
   <body>
     <div id="stage">
       <div id="view">
-        <div id="match-bar" hidden><span id="match-score"></span></div>
+        <div id="match-bar" hidden><span id="match-score"></span><span id="match-ping" aria-label="Latency"></span></div>
         <div id="app"></div>
         <div class="hud" id="hud" hidden>
           <div class="hud-toast" id="hud-toast" hidden></div>
@@ -119,7 +119,7 @@
         <h1 id="lobby-title">JOIN ROOM</h1>
         <label class="field">
           <span>NAME</span>
-          <input id="lobby-name" maxlength="10" placeholder="PLAYER" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="done" />
+          <input id="lobby-name" placeholder="PLAYER" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="done" />
         </label>
         <div id="lobby-host" hidden>
           <div class="room-code" id="room-code" aria-label="Join code"></div>
@@ -132,7 +132,7 @@
         <div id="lobby-join" hidden>
           <label class="field">
             <span>CODE</span>
-            <input id="lobby-code" class="code-input" maxlength="5" placeholder="-----" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="go" />
+            <input id="lobby-code" class="code-input" placeholder="-----" spellcheck="false" autocapitalize="characters" autocorrect="off" enterkeyhint="go" />
           </label>
           <button type="submit" class="big" id="lobby-join-go" hidden>TAP TO JOIN</button>
         </div>

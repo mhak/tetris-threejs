@@ -44,6 +44,12 @@ export function isTextField(target) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable === true;
 }
 
+/** Keys the focused element handles itself: typing in a field, Space or Enter on a button. */
+function isControlKey(e) {
+  if (isTextField(e.target)) return true;
+  return e.target?.tagName === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter');
+}
+
 /** In solo play player 1 can use either keyboard layout. */
 function mergeLayouts(layouts) {
   const merged = {};
@@ -66,7 +72,7 @@ export class Input {
     target.addEventListener('keydown', (e) => {
       // Leave browser shortcuts (Ctrl/Cmd/Alt + key) alone and out of the game.
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (isTextField(e.target)) return;
+      if (isControlKey(e)) return;
       if (gameKeys.has(e.code)) e.preventDefault();
       this.keys.add(e.code);
       this.tapped.add(e.code);

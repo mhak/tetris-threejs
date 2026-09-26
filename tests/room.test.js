@@ -349,3 +349,76 @@ test('a page back from a long suspension sees that it left', async () => {
   assert.equal(r.guest.state, 'closed');
   assert.equal(r.guest.closeReason, 'forfeit-lose');
 });
+
+test('back from the background and resumed: a later outage has no winner', async () => {
+  const r = await room();
+  r.host.setHidden(true);
+  await r.wait(1000);
+  r.host.setHidden(false);
+  await r.wait(100);
+  assert.equal(r.guest.remoteAway, false); // the host said it's back
+  r.guest.pressStart(); // the guest resumes
+  await r.wait(COUNTDOWN_MS + 100);
+  assert.equal(r.host.state, 'playing');
+  r.network.cut = true;
+  await r.wait(LIVENESS_MS + GRACE_MS + 1000, 500);
+  assert.equal(r.host.closeReason, 'lost');
+  assert.equal(r.guest.closeReason, 'lost');
+});
+
+test('a short trip to the background during the result screen is not a forfeit later', async () => {
+  const r = await room();
+  await finishRound(r);
+  r.guest.setHidden(true);
+  await r.wait(500);
+  assert.equal(r.host.remoteAway, true);
+  r.guest.setHidden(false);
+  await r.wait(100);
+  assert.equal(r.host.remoteAway, false);
+  r.network.cut = true;
+  await r.wait(LIVENESS_MS + GRACE_MS + 1000, 500);
+  assert.equal(r.host.closeReason, 'lost');
+  assert.equal(r.guest.closeReason, 'lost');
+});
+
+test('a reconnect while one side is still in the background stays paused', async () => {
+  const r = await room();
+  r.host.setHidden(true);
+  await r.wait(100);
+  r.guest.transport.sever();
+  await r.wait(RETRY_WAIT);
+  assert.equal(r.host.connected, true);
+  assert.equal(r.host.state, 'paused');
+  assert.equal(r.guest.state, 'paused');
+  assert.equal(r.guest.remoteAway, true);
+  await r.wait(COUNTDOWN_MS + 500);
+  assert.equal(r.guest.state, 'paused');
+});
+
+test('a reconnect keeps a pause nobody resumed', async () => {
+  const r = await room();
+  r.guest.pressStart();
+  await r.wait(100);
+  assert.equal(r.host.state, 'paused');
+  r.network.cut = true;
+  await r.wait(LIVENESS_MS + 500);
+  r.network.cut = false;
+  await r.wait(12000);
+  assert.equal(r.host.connected, true);
+  assert.equal(r.host.state, 'paused');
+  assert.equal(r.guest.state, 'paused');
+  r.host.pressStart(); // resume still works
+  await r.wait(COUNTDOWN_MS + 200);
+  assert.equal(r.guest.state, 'playing');
+});
+
+test('garbage and self-powers reach the mirror without a piece move', async () => {
+  const r = await room();
+  const g = r.guest.game.players[0];
+  const piece = { ...g.currentPiece };
+  g.addLine();
+  g.leftSlide();
+  await r.wait(100);
+  assert.deepEqual(r.host.game.players[1].field, g.field);
+  assert.equal(g.currentPiece.posX, piece.posX);
+});

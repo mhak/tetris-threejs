@@ -8,7 +8,7 @@
 // reject(conn, message). "Room is full" is decided that way by the session,
 // since only it knows the resume token.
 export class Transport {
-  host(code) {}           // Promise<void>; rejects with { code: 'taken' | 'failed' }
+  host(code, options) {}  // Promise<void>; rejects with { code: 'taken' | 'failed' } ('failed' also after options.timeoutMs)
   join(code, options) {}  // Promise<void>; rejects with { code: 'not-found' | 'failed' } ('failed' also after options.timeoutMs)
   send(message) {}        // reliable, ordered, to the current connection; dropped when there is none
   accept(conn) {}         // host: make `conn` the current connection (closes an older one)

@@ -493,7 +493,7 @@ ordered data channel.
 | `pause` / `resume` | both | `reason?` | Pause both / resume both. `pause` has `reason: 'hidden'` when the sender went to the background (2.6). |
 | `ping` / `pong` | both | `ts` | Every 1 s from a timer; the only liveness signal ("lost" after 5 s) and a latency readout. |
 | `bye` | both | | Player left the room. |
-| `sync` | host to guest | `round`, `seed`, `winner`, `ready`, `wins` | Sent right after the host's `hello` on a reconnect: where the room is (added while building, see 10). |
+| `sync` | host to guest | `round`, `seed`, `winner`, `ready`, `wins`, `paused` | Sent right after the host's `hello` on a reconnect: where the room is (added while building, see 10). |
 
 The build ID is the deployed commit, injected at build time with Vite's
 `define` (e.g. `__BUILD_ID__` from `GITHUB_SHA` in the deploy workflow, `dev`
@@ -633,6 +633,8 @@ Found while building:
 | Guest reconnect timing | A new attempt starts 2 s after the previous one failed (each attempt gives up after 8 s), not every 2 s, so attempts can't pile up on a slow network. | 4.5 |
 | What `sessionStorage` keeps | Also the round's seed and result, so a reload after a finished round goes straight back to the result screen. Still nothing about the board. | 4.5 |
 | Grace period start | Counted from the last message heard (plus the 5 s), so a page back from a long suspension sees at once that the grace period is over. | 2.6 |
+| Who "went to the background" when the grace period ends | Our side: the page is hidden right then (a page coming back checks the connection before it counts as back). Their side: they sent `pause` with `reason: 'hidden'` and nothing since that shows they're back: a page that comes back sends a plain `pause`, and `resume` or `ready` also clear it. Without this, a player who came back and kept playing would still forfeit on a later plain outage. | 2.6 |
+| Pause across a reconnect | A pause nobody resumed stays paused after a reconnect (`sync` carries `paused`), and a page still in the background pauses again, instead of both sides counting down into play. | 2.6, 4.5 |
 | Own broker | `VITE_PEER_SERVER` at build time points PeerJS at our own peerjs-server. Also used to test `PeerTransport` against a local broker. | 4.1 |
 | Outgoing Drop | Plays `boom` but doesn't shake the sender's camera; the shake is for the player who is hit. | 5.2 |
 | "Joined" message | The host sees "SAM JOINED", the guest "JOINED ALEX". | 2.2 |

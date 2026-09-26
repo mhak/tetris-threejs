@@ -37,3 +37,16 @@ test('keys typed into a text field are not blocked or turned into game input', (
   assert.ok(Object.values(state).every((v) => !v));
   assert.equal(any, 0);
 });
+
+test('Space and Enter on a focused button press the button, not Start', () => {
+  const { input, key } = setup();
+  let any = 0;
+  input.onAnyInput = () => any++;
+  assert.equal(key('Space', 'BUTTON').defaultPrevented, false);
+  assert.equal(key('Enter', 'BUTTON').defaultPrevented, false);
+  assert.equal(input.getState(0).start, false);
+  assert.equal(any, 0);
+  // Other game keys still work while a button has focus.
+  assert.equal(key('KeyA', 'BUTTON').defaultPrevented, true);
+  assert.equal(input.getState(0).left, true);
+});

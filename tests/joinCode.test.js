@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CODE_ALPHABET, CODE_LENGTH, generateCode, isValidCode, normalizeCode, peerIdFor } from '../src/net/joinCode.js';
+import { CODE_ALPHABET, CODE_LENGTH, codeFromInput, generateCode, isValidCode, normalizeCode, peerIdFor } from '../src/net/joinCode.js';
 
 test('the code alphabet has 31 symbols and none that look alike', () => {
   assert.equal(CODE_ALPHABET.length, 31);
@@ -45,4 +45,12 @@ test('isValidCode needs exactly 5 alphabet characters', () => {
 
 test('peer IDs carry the app prefix', () => {
   assert.equal(peerIdFor('K7QX3'), 'tetris-threejs-K7QX3');
+});
+
+test('a pasted code or join link gives the code', () => {
+  assert.equal(codeFromInput('K7Q-X3'), 'K7QX3');
+  assert.equal(codeFromInput('https://mhak.github.io/tetris-threejs/?join=k7qx3'), 'K7QX3');
+  assert.equal(codeFromInput('join me: https://x.io/?a=1&join=K7QX3#top'), 'K7QX3');
+  assert.equal(codeFromInput('K7Q'), 'K7Q');
+  assert.equal(codeFromInput(null), '');
 });

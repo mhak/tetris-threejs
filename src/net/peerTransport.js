@@ -38,24 +38,32 @@ export class PeerTransport extends Transport {
     return this.conn;
   }
 
-  host(code) {
+  host(code, { timeoutMs = 15000 } = {}) {
     this.destroyPeer();
     return new Promise((resolve, reject) => {
       const peer = new Peer(peerIdFor(code), this.peerOptions);
       this.peer = peer;
-      let opened = false;
+      let settled = false;
+      const fail = (reason) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (this.peer === peer) this.peer = null;
+        peer.destroy();
+        reject({ code: reason });
+      };
+      // A broker that never answers (captive portal, blocked websocket) must not hang us.
+      const timer = setTimeout(() => fail('failed'), timeoutMs);
       peer.on('open', () => {
-        opened = true;
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         resolve();
       });
       peer.on('connection', (conn) => this.watchCandidate(conn));
       peer.on('disconnected', () => this.retryBroker(peer));
-      peer.on('error', (err) => {
-        if (opened) return; // later errors end in 'disconnected', handled above
-        if (this.peer === peer) this.peer = null;
-        peer.destroy();
-        reject({ code: err?.type === 'unavailable-id' ? 'taken' : 'failed' });
-      });
+      // Errors after 'open' end in 'disconnected', handled above.
+      peer.on('error', (err) => fail(err?.type === 'unavailable-id' ? 'taken' : 'failed'));
     });
   }
 

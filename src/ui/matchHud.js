@@ -26,6 +26,7 @@ export class MatchHud {
     const $ = (id) => root.getElementById(id);
     this.bar = $('match-bar');
     this.score = $('match-score');
+    this.ping = $('match-ping');
     this.root = $('hud');
     this.toastBox = $('hud-toast');
     this.panel = $('hud-panel');
@@ -66,6 +67,8 @@ export class MatchHud {
     this.bar.hidden = false;
     this.root.hidden = false;
     this.score.textContent = `${me} ${mine} - ${theirs} ${them}`;
+    // Round trip from ping / pong, while connected.
+    this.ping.textContent = s.connected && s.latency !== null ? `${Math.round(s.latency)} MS` : '';
 
     let title = '';
     let text = '';

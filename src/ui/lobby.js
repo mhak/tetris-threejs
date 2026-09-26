@@ -1,5 +1,5 @@
 // Create / join screens shown inside the start overlay.
-import { CODE_LENGTH, normalizeCode } from '../net/joinCode.js';
+import { CODE_LENGTH, codeFromInput, normalizeCode } from '../net/joinCode.js';
 import { cleanName, loadName, normalizeNameInput, saveName } from '../net/playerName.js';
 
 export const ERROR_TEXT = {
@@ -9,6 +9,7 @@ export const ERROR_TEXT = {
   version: 'YOUR OPPONENT IS ON A DIFFERENT VERSION. RELOAD THE PAGE.',
   taken: "COULDN'T CREATE A ROOM. TRY AGAIN.",
   lost: 'CONNECTION LOST',
+  load: "COULDN'T LOAD ONLINE PLAY. CHECK THE CONNECTION OR RELOAD THE PAGE.",
 };
 
 /** Replaces an input's value without jumping the caret when nothing changed. */
@@ -44,7 +45,7 @@ export class Lobby {
       this.onNameChange?.(cleanName(this.nameInput.value));
     });
     this.codeInput.addEventListener('input', () => {
-      setValue(this.codeInput, normalizeCode(this.codeInput.value));
+      setValue(this.codeInput, codeFromInput(this.codeInput.value));
       this.setStatus('');
       // Connect on our own once the code is complete, unless a tap is needed first.
       if (this.joinButton.hidden) this.submitJoin();
@@ -124,10 +125,6 @@ export class Lobby {
     this.busy = busy;
     this.nameInput.disabled = busy && this.mode === 'join';
     this.codeInput.disabled = busy;
-  }
-
-  lockName() {
-    this.nameInput.disabled = true;
   }
 
   /** The host's code, with a share button and a QR code of the join link. */
