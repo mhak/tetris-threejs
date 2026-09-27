@@ -141,6 +141,17 @@ test('leaving tells the opponent', async () => {
   assert.equal(r.hostStorage.load(), null);
 });
 
+test('a closed room is not saved again, so a reload does not offer it', async () => {
+  const r = await room();
+  r.guest.leave();
+  await flush();
+  assert.equal(r.host.state, 'closed');
+  // The end screen is still up: going to the background and pagehide both save.
+  r.host.setHidden(true);
+  r.host.save();
+  assert.equal(r.hostStorage.load(), null);
+});
+
 test('ping and pong measure the latency', async () => {
   const r = await room();
   assert.ok(Number.isFinite(r.host.latency));

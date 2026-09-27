@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { TetrisField, Width, Height } from '../src/game/tetrisField.ts';
 import { createTetromino, type PieceKind } from '../src/game/tetromino.ts';
 import { GameScreen } from '../src/game/gameScreen.ts';
-import { emptyState } from '../src/game/input.ts';
+import { emptyState, type PadState } from '../src/game/input.ts';
 import type { SoundName } from '../src/game/tetrisField.ts';
 import { Block } from '../src/game/block.ts';
 
@@ -159,6 +159,20 @@ test('held down key repeats after the key press delay', () => {
   assert.equal(p1.currentPiece.posX, startX - 2);
 });
 
+test('holding rotate does not make a held direction repeat faster', () => {
+  const game = new GameScreen({ playerCount: 2, random: fixedRandom(0) });
+  const p1 = fields(game)[0];
+  const hold = (buttons: Partial<PadState>) => (j: number) => ({ ...emptyState(), ...(j === 0 ? buttons : {}) });
+  game.update(16, hold({ a: true })); // rotates once, then stays held
+  const startX = p1.currentPiece.posX;
+  game.update(16, hold({ a: true, left: true })); // initial press moves immediately
+  assert.equal(p1.currentPiece.posX, startX - 1);
+  for (let i = 0; i < 5; i++) game.update(16, hold({ a: true, left: true })); // 80ms: no repeat yet
+  assert.equal(p1.currentPiece.posX, startX - 1);
+  for (let i = 0; i < 5; i++) game.update(16, hold({ a: true, left: true })); // passes 150ms
+  assert.equal(p1.currentPiece.posX, startX - 2);
+});
+
 test('a garbage line pushes a low piece up instead of ending the game', () => {
   const f = fieldWith('O');
   f.field[Height - 1].fill(Block.J);
@@ -195,6 +209,26 @@ test('locking with cells above the well is a game over', () => {
   for (let y = 1; y < Height; y++) f.field[y].fill(Block.J);
   for (let y = 1; y < Height; y++) f.field[y][0] = 0;
   f.movePieceHardDrop();
+  assert.equal(f.isGameOver, true);
+});
+
+test('lines the last piece completed make room for the next one', () => {
+  const f = fieldWith('I');
+  // Columns 1-9 stacked to the top, so the next piece can't spawn until a
+  // vertical I in column 0 clears the bottom four rows.
+  for (let y = 0; y < Height; y++) for (let x = 1; x < Width; x++) f.field[y][x] = Block.J;
+  f.currentPiece.rotateRight();
+  f.currentPiece.posX = -f.currentPiece.shape[0].findIndex((v) => v !== 0);
+  f.movePieceHardDrop();
+  assert.equal(f.update(16), 4); // still a tetris, so the garbage line goes out
+  assert.equal(f.isGameOver, false);
+  assert.equal(f.lines, 4);
+});
+
+test('a new piece that does not fit ends the game', () => {
+  const f = fieldWith('T'); // filled cells in rows -1 and 0 at the spawn row
+  for (let y = 0; y < Height; y++) f.field[y][4] = Block.J; // no full rows
+  f.update(16);
   assert.equal(f.isGameOver, true);
 });
 

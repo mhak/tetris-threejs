@@ -163,14 +163,16 @@ export class TetrisField {
 
   /** Advances the field by `elapsedMs`; returns the number of lines cleared. */
   update(elapsedMs: number): number {
+    // Clear first: the lines the last piece completed may make room for the
+    // new one, so they must not count as a top-out.
+    const lines = this.clearLines();
+
     // Only a spawn (or held piece) that doesn't fit can overlap here: every
     // other field change runs settlePiece() to push the piece clear.
     if (this.isCollision(this.currentPiece)) {
       this.setGameOver();
-      return 0;
+      return lines;
     }
-
-    const lines = this.clearLines();
 
     this.current += elapsedMs;
     if (this.current >= this.speed) {

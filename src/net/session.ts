@@ -401,6 +401,8 @@ export class Session {
 
   /** Keeps the room for a reload. Also called on pagehide, so lastSeen is fresh. */
   save() {
+    // A closed room is gone for both sides: a reload must not offer it again.
+    if (this.state === 'closed') return;
     if (!this.storage || !this.token || this.remoteName === null || this.round < 1) return;
     this.storage.save({
       role: this.role,

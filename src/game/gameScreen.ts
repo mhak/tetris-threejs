@@ -219,8 +219,14 @@ export class GameScreen {
   handlePlayerInputs(elapsedMs: number, playerField: TetrisField, next: PadState, old: PadState): boolean {
     const n = playerField.playerNum;
     const pressed = (b: Button) => next[b] && !old[b];
+    // One auto-repeat timer, advanced at most once per frame, so holding
+    // more than one button doesn't make the held direction repeat faster.
+    let advanced = false;
     const repeat = (b: Button) => {
-      this.keysAccumulation[n] += elapsedMs;
+      if (!advanced) {
+        this.keysAccumulation[n] += elapsedMs;
+        advanced = true;
+      }
       return !old[b] || this.keysAccumulation[n] >= playerField.keyPressDelay;
     };
 
@@ -260,20 +266,14 @@ export class GameScreen {
       this.onHardDrop?.(playerField);
     }
 
-    if (next.a) {
-      this.keysAccumulation[n] += elapsedMs;
-      if (!old.a) {
-        playerField.rotatePieceRight();
-        this.keysAccumulation[n] = 0;
-      }
+    if (pressed('a')) {
+      playerField.rotatePieceRight();
+      this.keysAccumulation[n] = 0;
     }
 
-    if (next.x) {
-      this.keysAccumulation[n] += elapsedMs;
-      if (!old.x) {
-        playerField.rotatePieceLeft();
-        this.keysAccumulation[n] = 0;
-      }
+    if (pressed('x')) {
+      playerField.rotatePieceLeft();
+      this.keysAccumulation[n] = 0;
     }
 
     if (pressed('rb')) playerField.holdPiece();
